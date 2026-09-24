@@ -29,7 +29,7 @@ $$\text{Observe} \longrightarrow \text{Diagnose} \longrightarrow \text{Choose Ac
 | **2** | **World Model + Migration 0001** | 15 SQLAlchemy 2.0 models, Alembic sync migration, polymorphic discriminators, Brier trigger, constraints | **COMPLETED** | `da9d9d2` | [Green (Run 35972591152)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35972591152) |
 | **3** | **Resume Reader + GitHub Client** | Verbatim text/PDF span reader with exact locators, rate-limited public GitHub REST client, local disk cache | **COMPLETED** | `a430481` | [Green (Run 35974080710)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35974080710) |
 | **4** | **Grounded Extractor + Dedup** | Structured LLM extraction, character-indexed verbatim grounding validation, claim dropping, SHA-256 hash dedup, idempotent upsert | **COMPLETED** | `42ddd73` | [Green (Run 35981759883)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35981759883) |
-| **5** | **Goal Compiler** | Free-text objective parser into `target_spec`, numeric metrics, and back-solved sub-goal milestone timelines | **COMPLETED** | Pending commit | Running in CI |
+| **5** | **Goal Compiler** | Free-text objective parser into `target_spec`, numeric metrics, and back-solved sub-goal milestone timelines | **COMPLETED** | `52cd4b6` | [Green (Run 35984792388)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35984792388) |
 | **6** | **CLI (`pilot`)** | Typer + Rich terminal commands: `pilot init`, `pilot ingest`, `pilot goal set`, `pilot show` | **NEXT UP** | *Pending* | *Pending* |
 | **7** | **Final Tests** | End-to-end integration tests: grounding guarantee validation, timeline back-solving, upsert idempotency | **REMAINING** | *Pending* | *Pending* |
 |
