@@ -249,11 +249,14 @@ def ingest(
 
     # Render Dropped Claims Audit Table
     all_dropped = [
-        ("resume", claim, excerpt, reason) for claim, excerpt, reason in resume_result.dropped
+        ("resume", item.claim, item.source_excerpt, item.reason) for item in resume_result.dropped
     ]
     if github_result:
         all_dropped.extend(
-            [("github", claim, excerpt, reason) for claim, excerpt, reason in github_result.dropped]
+            [
+                ("github", item.claim, item.source_excerpt, item.reason)
+                for item in github_result.dropped
+            ]
         )
 
     if all_dropped:
