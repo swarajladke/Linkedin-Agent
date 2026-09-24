@@ -207,9 +207,9 @@ def test_rollback_on_failure_zero_orphan_actions(session: Session):
 
     # After rollback, no new orphan actions
     final_action_count = session.scalar(select(Action.id).count()) or 0
-    assert (
-        final_action_count == initial_action_count
-    ), f"Orphan actions detected: {final_action_count - initial_action_count} extra"
+    assert final_action_count == initial_action_count, (
+        f"Orphan actions detected: {final_action_count - initial_action_count} extra"
+    )
 
 
 @pytest.mark.integration
