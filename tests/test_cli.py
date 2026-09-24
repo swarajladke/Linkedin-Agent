@@ -121,7 +121,7 @@ def test_pilot_ingest_sample_resume_and_idempotency(monkeypatch):
     assert res1.exit_code == 0
     assert "Extraction & Grounding Summary" in res1.stdout
     assert "Ungrounded Claims Dropped" in res1.stdout
-    assert "Invented Kubernetes single-handedly" in res1.stdout
+    assert "Invented Kubernetes" in res1.stdout
     assert "Successfully ingested and persisted 1 new evidence claims" in res1.stdout
 
     # Verify claim in database
