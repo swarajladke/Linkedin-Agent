@@ -2,10 +2,12 @@
 
 from pilot.ingestion.github import (
     GitHubClient,
+    GitHubClientError,
     GitHubProfile,
     GitHubRateLimitError,
     GitHubRepo,
     GitHubUserData,
+    GitHubUserNotFoundError,
 )
 from pilot.ingestion.reader import (
     EncryptedPDFError,
@@ -26,8 +28,10 @@ __all__ = [
     "ImageOnlyPDFError",
     "UnsupportedFileFormatError",
     "GitHubClient",
+    "GitHubClientError",
     "GitHubProfile",
     "GitHubRepo",
     "GitHubUserData",
     "GitHubRateLimitError",
+    "GitHubUserNotFoundError",
 ]
