@@ -2,7 +2,7 @@
 
 **Project:** Pilot — Goal-Directed Autonomous Career Agent  
 **Phase:** Phase 1 (World Model & Ingestion Engine)  
-**Status:** **3 of 7 Steps Completed (43%)** | **4 Steps Remaining (57%)**  
+**Status:** **4 of 7 Steps Completed (57%)** | **3 Steps Remaining (43%)**  
 **Repository:** [`swarajladke/Linkedin-Agent`](https://github.com/swarajladke/Linkedin-Agent.git) (Branch: `main`)
 
 ---
@@ -29,8 +29,8 @@ $$\text{Observe} \longrightarrow \text{Diagnose} \longrightarrow \text{Choose Ac
 | **1** | **Scaffold + Docker + Config** | Pyproject, Ruff, Pytest, Docker Compose (pgvector 16), Pydantic Settings (`SecretStr`) | **COMPLETED** | `c84ffa1` | Verified |
 | **2** | **World Model + Migration 0001** | 15 SQLAlchemy 2.0 models, Alembic sync migration, polymorphic discriminators, Brier trigger, constraints | **COMPLETED** | `da9d9d2` | [Green (Run 35972591152)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35972591152) |
 | **3** | **Resume Reader + GitHub Client** | Verbatim text/PDF span reader with exact locators, rate-limited public GitHub REST client, local disk cache | **COMPLETED** | `a430481` | [Green (Run 35974080710)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35974080710) |
-| **4** | **Grounded Extractor + Dedup** | Structured LLM extraction, provenance validation against spans, claim dropping, SHA-256 hash deduplication | **REMAINING** | *Pending* | *Pending* |
-| **5** | **Goal Compiler** | Free-text objective parser into `target_spec`, numeric metrics, and back-solved sub-goal milestone timelines | **REMAINING** | *Pending* | *Pending* |
+| **4** | **Grounded Extractor + Dedup** | Structured LLM extraction, provenance validation against spans, claim dropping, SHA-256 hash deduplication | **COMPLETED** | Pending commit | Running in CI |
+| **5** | **Goal Compiler** | Free-text objective parser into `target_spec`, numeric metrics, and back-solved sub-goal milestone timelines | **NEXT UP** | *Pending* | *Pending* |
 | **6** | **CLI (`pilot`)** | Typer + Rich terminal commands: `pilot init`, `pilot ingest`, `pilot goal set`, `pilot show` | **REMAINING** | *Pending* | *Pending* |
 | **7** | **Final Tests** | End-to-end integration tests: grounding guarantee validation, timeline back-solving, upsert idempotency | **REMAINING** | *Pending* | *Pending* |
 
@@ -95,18 +95,20 @@ $$\text{Observe} \longrightarrow \text{Diagnose} \longrightarrow \text{Choose Ac
 
 ---
 
-### Step 4: Grounded Extractor + Deduplication *(Next Up)*
+### Step 4: Grounded Extractor + Deduplication *(Completed)*
 - **Objective:** Transform raw `ResumeDocument` spans and `GitHubUserData` into validated `EvidenceClaim` records using structured LLM extraction.
-- **Specifications:**
-  - **LLM Wrapper**: Structured output extraction using Pydantic schemas with automatic validation, retry on schema mismatch, and fallback/raise.
-  - **Strict Grounding Enforcement**: Every extracted claim must reference an exact verbatim `source_excerpt` found within the ingested `SourceSpan` list. Any claim fabricated or hallucinated without an exact matching source excerpt and valid `source_url` is automatically dropped.
-  - **Deduplication & Idempotency**:
-    - Generates SHA-256 `content_hash = sha256(claim.strip().lower() + "|" + source_url.strip())`.
-    - Upserts into PostgreSQL `evidence_claims` table on `(entity_id, content_hash)` conflict, updating `confidence` and `verified_at`.
+- **Implemented Artifacts:**
+  - `src/pilot/extraction/schemas.py`: `ExtractedClaim` with minimum excerpt length of 8, categorization (`kind`), and `ExtractionBatch`.
+  - `src/pilot/extraction/llm.py`: `StructuredLLMClient` protocol and `OpenAIStructuredClient` with lazy SDK import and bounded JSON/Pydantic validation retries.
+  - `src/pilot/extraction/grounding.py`: `GroundingValidator` with character-level index mapping from normalized text to original verbatim substrings and refined locators (`f"{span.locator};excerpt_chars={start}-{end}"`).
+  - `src/pilot/extraction/spans.py`: `github_to_spans` flattening profile, repositories, commit counts, and chunked READMEs into uniform `SourceSpan`s.
+  - `src/pilot/extraction/extractor.py`: `GroundedExtractor` enforcing confidence floor, strict grounding gate, provenance rewriting, and in-run deduplication.
+  - `src/pilot/extraction/repository.py`: `upsert_evidence_claims` performing idempotent PostgreSQL upserts on `(entity_id, content_hash)` conflict.
+  - Test suite: `tests/test_grounding.py`, `tests/test_extractor.py`, `tests/test_github_spans.py`, `tests/test_evidence_dedup.py`.
 
 ---
 
-### Step 5: Goal Compiler *(Remaining)*
+### Step 5: Goal Compiler *(Next Up)*
 - **Objective:** Translate human natural language career objectives and constraints into a machine-executable, time-sequenced world model goal.
 - **Specifications:**
   - **Input:** Raw objective string (e.g., *"Land an Applied AI Engineer role, remote or Bangalore, by Dec 1"*) and constraints dict.
