@@ -5,11 +5,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from typer.testing import CliRunner
 
 from pilot.cli.main import app
-from pilot.db.models import EvidenceClaim, Goal, User
+from pilot.config import get_settings
+from pilot.db.models import EvidenceClaim, Goal, GoalStatus, User
+from pilot.db.session import get_db_session
 from pilot.extraction.extractor import ExtractionDroppedClaim, ExtractionResult
 from pilot.goals.schemas import CompiledGoalDraft, FunnelAssumptions
 from pilot.schemas.evidence import EvidenceClaimCreate, compute_claim_content_hash
@@ -18,10 +20,13 @@ from pilot.schemas.goal import TargetSpec
 runner = CliRunner()
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def mock_openai_env(monkeypatch):
-    """Ensure OPENAI_API_KEY is configured for CLI tests."""
+    """Ensure OPENAI_API_KEY is configured and settings cache cleared for all CLI tests."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-mock-key-for-cli")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def test_cli_help_and_subcommand_helps():
@@ -42,7 +47,7 @@ def test_cli_help_and_subcommand_helps():
         assert "Usage" in sub_res.stdout
 
 
-def test_pilot_init_idempotent(db_session):
+def test_pilot_init_idempotent():
     """Test that pilot init successfully registers a user and repeated calls update idempotently."""
     email = f"test_{uuid.uuid4().hex[:8]}@example.com"
     name = "CLI Candidate"
@@ -62,20 +67,24 @@ def test_pilot_init_idempotent(db_session):
     assert "User updated successfully" in res2.stdout
 
     # Verify exactly one user in database
-    users = db_session.scalars(select(User).where(User.email == email)).all()
-    assert len(users) == 1
-    assert users[0].full_name == "Updated Candidate"
+    with get_db_session() as session:
+        users = session.scalars(select(User).where(User.email == email)).all()
+        assert len(users) == 1
+        assert users[0].full_name == "Updated Candidate"
 
 
-def test_pilot_ingest_sample_resume_and_idempotency(db_session, mock_openai_env, monkeypatch):
+def test_pilot_ingest_sample_resume_and_idempotency(monkeypatch):
     """Test pilot ingest extracts claims, displays audit summary, and re-running is idempotent."""
-    # 1. Register candidate user
     email = f"ingest_{uuid.uuid4().hex[:8]}@example.com"
-    user = User(email=email, full_name="Ingest Candidate")
-    db_session.add(user)
-    db_session.commit()
+    init_res = runner.invoke(app, ["init", "--email", email, "--name", "Ingest Candidate"])
+    assert init_res.exit_code == 0
 
-    # 2. Mock GroundedExtractor.extract to return deterministic claims and dropped record
+    with get_db_session() as session:
+        user = session.scalar(select(User).where(User.email == email))
+        assert user is not None
+        user_id = user.id
+
+    # Mock GroundedExtractor.extract to return deterministic claims and dropped record
     sample_resume = Path("tests/fixtures/sample_resume.txt")
     source_url = f"{sample_resume.resolve().as_uri()}#line=1;chars=0-50"
     claim_text = "Built real-time distributed feature store"
@@ -83,7 +92,7 @@ def test_pilot_ingest_sample_resume_and_idempotency(db_session, mock_openai_env,
 
     mock_claim = EvidenceClaimCreate(
         entity_type="user",
-        entity_id=user.id,
+        entity_id=user_id,
         claim=claim_text,
         source="resume",
         source_url=source_url,
@@ -116,10 +125,11 @@ def test_pilot_ingest_sample_resume_and_idempotency(db_session, mock_openai_env,
     assert "Successfully ingested and persisted 1 new evidence claims" in res1.stdout
 
     # Verify claim in database
-    claims = db_session.scalars(
-        select(EvidenceClaim).where(EvidenceClaim.entity_id == user.id)
-    ).all()
-    assert len(claims) == 1
+    with get_db_session() as session:
+        claims = session.scalars(
+            select(EvidenceClaim).where(EvidenceClaim.entity_id == user_id)
+        ).all()
+        assert len(claims) == 1
 
     # Second ingest run (idempotent: 0 new rows written)
     res2 = runner.invoke(app, ["ingest", "--resume", str(sample_resume)])
@@ -127,12 +137,13 @@ def test_pilot_ingest_sample_resume_and_idempotency(db_session, mock_openai_env,
     assert "Idempotent ingest: 0 new rows written" in res2.stdout
 
 
-def test_pilot_ingest_image_only_pdf_exits_one(db_session, mock_openai_env):
+def test_pilot_ingest_image_only_pdf_exits_one():
     """Test that un-OCR'd image-only PDF exits 1 with a clean message and no traceback."""
-    # Ensure active user exists
-    user = User(email=f"pdf_{uuid.uuid4().hex[:8]}@example.com", full_name="PDF Candidate")
-    db_session.add(user)
-    db_session.commit()
+    init_res = runner.invoke(
+        app,
+        ["init", "--email", f"pdf_{uuid.uuid4().hex[:8]}@example.com", "--name", "PDF Candidate"],
+    )
+    assert init_res.exit_code == 0
 
     image_pdf = Path("tests/fixtures/image_only_resume.pdf")
     res = runner.invoke(app, ["ingest", "--resume", str(image_pdf)])
@@ -141,11 +152,16 @@ def test_pilot_ingest_image_only_pdf_exits_one(db_session, mock_openai_env):
     assert "Traceback" not in res.stdout
 
 
-def test_pilot_goal_set_past_deadline_exits_one(db_session, mock_openai_env):
+def test_pilot_goal_set_past_deadline_exits_one():
     """Test that pilot goal set with a past deadline exits 1 without persisting a goal."""
-    user = User(email=f"goal_{uuid.uuid4().hex[:8]}@example.com", full_name="Goal Candidate")
-    db_session.add(user)
-    db_session.commit()
+    email = f"goal_{uuid.uuid4().hex[:8]}@example.com"
+    init_res = runner.invoke(app, ["init", "--email", email, "--name", "Goal Candidate"])
+    assert init_res.exit_code == 0
+
+    with get_db_session() as session:
+        user = session.scalar(select(User).where(User.email == email))
+        assert user is not None
+        user_id = user.id
 
     res = runner.invoke(
         app,
@@ -156,17 +172,22 @@ def test_pilot_goal_set_past_deadline_exits_one(db_session, mock_openai_env):
     assert "in the past" in res.stdout
 
     # Verify no goal was persisted
-    goals = db_session.scalars(select(Goal).where(Goal.user_id == user.id)).all()
-    assert len(goals) == 0
+    with get_db_session() as session:
+        goals = session.scalars(select(Goal).where(Goal.user_id == user_id)).all()
+        assert len(goals) == 0
 
 
-def test_pilot_goal_set_success_renders_spec_and_timeline(db_session, mock_openai_env, monkeypatch):
+def test_pilot_goal_set_success_renders_spec_and_timeline(monkeypatch):
     """Test successful pilot goal set compiles and persists goal with rendered tables."""
-    user = User(email=f"goal_ok_{uuid.uuid4().hex[:8]}@example.com", full_name="Goal Candidate OK")
-    db_session.add(user)
-    db_session.commit()
+    email = f"goal_ok_{uuid.uuid4().hex[:8]}@example.com"
+    init_res = runner.invoke(app, ["init", "--email", email, "--name", "Goal Candidate OK"])
+    assert init_res.exit_code == 0
 
-    # Mock StructuredLLMClient for GoalCompiler
+    with get_db_session() as session:
+        user = session.scalar(select(User).where(User.email == email))
+        assert user is not None
+        user_id = user.id
+
     mock_draft = CompiledGoalDraft(
         target_spec=TargetSpec(
             must_have=["Applied AI Engineer", "Remote"],
@@ -206,61 +227,63 @@ def test_pilot_goal_set_success_renders_spec_and_timeline(db_session, mock_opena
     assert "Numeric Success Criteria" in res.stdout
     assert "Back-Solved Sub-Goal Timeline" in res.stdout
 
-    goals = db_session.scalars(select(Goal).where(Goal.user_id == user.id)).all()
-    assert len(goals) == 1
-    assert goals[0].objective_text == "Land an Applied AI Engineer role by 2027"
+    with get_db_session() as session:
+        goals = session.scalars(select(Goal).where(Goal.user_id == user_id)).all()
+        assert len(goals) == 1
+        assert goals[0].objective_text == "Land an Applied AI Engineer role by 2027"
 
 
 def test_pilot_show_empty_db_prints_hint():
     """Test that pilot show with no user records exits 0 and prints registration hint."""
+    with get_db_session() as session:
+        session.execute(text("TRUNCATE TABLE users CASCADE;"))
+        session.commit()
+
     res = runner.invoke(app, ["show"])
     assert res.exit_code == 0
-    # Must print hint without traceback
+    assert "Database is empty" in res.stdout
     assert "Traceback" not in res.stdout
-    assert (
-        "Database is empty" in res.stdout
-        or "No active goal found" in res.stdout
-        or "No evidence claims found" in res.stdout
-    )
 
 
-def test_pilot_show_renders_active_goal_and_evidence_claims(db_session):
+def test_pilot_show_renders_active_goal_and_evidence_claims():
     """Test pilot show renders panels and tables when goal and claims exist."""
-    user = User(email=f"show_{uuid.uuid4().hex[:8]}@example.com", full_name="Show Candidate")
-    db_session.add(user)
-    db_session.flush()
+    with get_db_session() as session:
+        user = User(email=f"show_{uuid.uuid4().hex[:8]}@example.com", full_name="Show Candidate")
+        session.add(user)
+        session.flush()
 
-    goal = Goal(
-        user_id=user.id,
-        objective_text="Land Applied AI Engineer role",
-        constraints_json={},
-        target_spec={"must_have": ["AI Role"], "nice_to_have": [], "unstated_but_real": []},
-        success_criteria={"min_offers": 1},
-        sub_goals=[
-            {
-                "id": "sg_1",
-                "title": "Portfolio",
-                "metric_target": {"claims": 5},
-                "deadline": "2027-01-01",
-                "status": "pending",
-            }
-        ],
-        deadline=datetime(2027, 6, 1, 0, 0, 0, tzinfo=UTC),
-    )
-    db_session.add(goal)
+        goal = Goal(
+            user_id=user.id,
+            objective_text="Land Applied AI Engineer role",
+            constraints_json={},
+            target_spec={"must_have": ["AI Role"], "nice_to_have": [], "unstated_but_real": []},
+            success_criteria={"min_offers": 1},
+            sub_goals=[
+                {
+                    "id": "sg_1",
+                    "title": "Portfolio",
+                    "metric_target": {"claims": 5},
+                    "deadline": "2027-01-01",
+                    "status": "pending",
+                }
+            ],
+            deadline=datetime(2027, 6, 1, 0, 0, 0, tzinfo=UTC),
+            status=GoalStatus.ACTIVE,
+        )
+        session.add(goal)
 
-    claim = EvidenceClaim(
-        entity_type="user",
-        entity_id=user.id,
-        claim="Trained LLaMA 3 fine-tuned model",
-        source="resume",
-        source_url="file:///resume.txt#line=1;chars=0-30",
-        source_excerpt="Trained LLaMA 3 fine-tuned model",
-        content_hash="mock_hash_123",
-        confidence=0.92,
-    )
-    db_session.add(claim)
-    db_session.commit()
+        claim = EvidenceClaim(
+            entity_type="user",
+            entity_id=user.id,
+            claim="Trained LLaMA 3 fine-tuned model",
+            source="resume",
+            source_url="file:///resume.txt#line=1;chars=0-30",
+            source_excerpt="Trained LLaMA 3 fine-tuned model",
+            content_hash="mock_hash_show_123",
+            confidence=0.92,
+        )
+        session.add(claim)
+        session.commit()
 
     res = runner.invoke(app, ["show"])
     assert res.exit_code == 0
