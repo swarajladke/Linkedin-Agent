@@ -92,7 +92,7 @@ def _seed_world(
             entity_id=user.id,
             claim=f"Implemented distributed systems component {i}",
             source="resume",
-            source_url=f"file:///resume.pdf#L{i*10}",
+            source_url=f"file:///resume.pdf#L{i * 10}",
             source_excerpt=f"Distributed systems component {i} with 99.9% uptime",
             content_hash=uuid.uuid4().hex[:64].ljust(64, "a"),
             confidence=0.90,
@@ -117,7 +117,7 @@ def _seed_world(
     for i in range(n_roles):
         role = Role(
             company_id=company.id,
-            title=f"Senior Software Engineer {i+1}",
+            title=f"Senior Software Engineer {i + 1}",
             location_type="remote",
             status=RoleStatus.OPEN,
             requirements_summary="Build distributed systems at scale",

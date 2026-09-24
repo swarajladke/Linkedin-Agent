@@ -1089,8 +1089,7 @@ def cycle_show(
 
         console.print(
             Panel(
-                f"[bold cyan]Cycle #{cycle.cycle_number}[/bold cyan]  "
-                f"Started: {cycle.started_at}",
+                f"[bold cyan]Cycle #{cycle.cycle_number}[/bold cyan]  Started: {cycle.started_at}",
                 expand=False,
             )
         )
