@@ -38,6 +38,7 @@ def test_cli_help_and_subcommand_helps():
     for subcmd in [
         ["init", "--help"],
         ["ingest", "--help"],
+        ["source", "--help"],
         ["goal", "--help"],
         ["goal", "set", "--help"],
         ["show", "--help"],
@@ -291,3 +292,33 @@ def test_pilot_show_renders_active_goal_and_evidence_claims():
     assert "Land Applied AI Engineer role" in res.stdout
     assert "Verified Evidence Claims" in res.stdout
     assert "Trained LLaMA 3 fine-tuned model" in res.stdout
+
+
+def test_pilot_source_command(monkeypatch):
+    """Test pilot source CLI command fetching and displaying sourcing table."""
+    from pilot.sourcing.schemas import SourcedPosting
+
+    mock_postings = [
+        SourcedPosting(
+            source="greenhouse",
+            external_id="cli-gh-1",
+            company_name="Canonical",
+            title="Senior Kernel Engineer",
+            location="Remote",
+            location_type="remote",
+            posting_url="https://boards.greenhouse.io/canonical/jobs/1",
+            description_text="Kernel engineering with C and Python.",
+            raw={"id": "cli-gh-1"},
+        )
+    ]
+
+    monkeypatch.setattr(
+        "pilot.sourcing.greenhouse.GreenhouseSource.fetch",
+        lambda self, query, force_refresh=False: mock_postings,
+    )
+
+    res = runner.invoke(app, ["source", "--board", "canonical"])
+    assert res.exit_code == 0
+    assert "Job Sourcing Results" in res.stdout
+    assert "Canonical (canonical)" in res.stdout
+    assert "Sourcing complete" in res.stdout

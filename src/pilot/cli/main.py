@@ -35,6 +35,14 @@ from pilot.ingestion import (
     ResumeReaderError,
     UnsupportedFileFormatError,
 )
+from pilot.sourcing import (
+    AshbySource,
+    GreenhouseSource,
+    LeverSource,
+    SourceQuery,
+    upsert_roles,
+)
+from pilot.sourcing.config import load_boards_config
 
 app = typer.Typer(no_args_is_help=True, help="Pilot: Goal-directed autonomous career agent CLI.")
 goal_app = typer.Typer(no_args_is_help=True, help="Manage candidate goals and strategy versions.")
@@ -416,6 +424,105 @@ def goal_set(
             f"{days_from_now:.1f}d",
         )
     console.print(sub_goal_table)
+
+
+@app.command()
+def source(
+    board: Annotated[
+        list[str] | None,
+        typer.Option("--board", "-b", help="Specific board token/slug(s) to source"),
+    ] = None,
+    all_boards: Annotated[
+        bool,
+        typer.Option("--all", "-a", help="Source all configured job boards"),
+    ] = False,
+    force_refresh: Annotated[
+        bool,
+        typer.Option("--force-refresh", help="Bypass local cache"),
+    ] = False,
+) -> None:
+    """Fetch job postings from permitted job board APIs and idempotently upsert into database."""
+    configured_boards = load_boards_config()
+    if not configured_boards:
+        console.print("[yellow]No boards configured in config/boards.yaml.[/yellow]")
+        raise typer.Exit(1)
+
+    targets: list[tuple[str, str, str]] = []  # (source, token, name)
+    selected_tokens = set(board) if board else set()
+
+    for src_name, entries in configured_boards.items():
+        for entry in entries:
+            tok = entry["token"]
+            name = entry["name"]
+            if (
+                all_boards
+                or not selected_tokens
+                or tok in selected_tokens
+                or tok.lower() in selected_tokens
+                or name.lower() in selected_tokens
+            ):
+                targets.append((src_name, tok, name))
+
+    if not targets and selected_tokens:
+        console.print(
+            f"[red]No configured boards matched selection: {', '.join(selected_tokens)}[/red]"
+        )
+        raise typer.Exit(1)
+
+    table = Table(title="Job Sourcing Results", show_lines=True)
+    table.add_column("Company / Board", style="cyan")
+    table.add_column("Source", style="magenta")
+    table.add_column("Fetched", justify="right")
+    table.add_column("New", justify="right", style="green")
+    table.add_column("Refreshed", justify="right", style="blue")
+    table.add_column("Closed", justify="right", style="yellow")
+
+    total_fetched = 0
+    total_new = 0
+    total_refreshed = 0
+    total_closed = 0
+
+    adapters = {
+        "greenhouse": GreenhouseSource(),
+        "ashby": AshbySource(),
+        "lever": LeverSource(),
+    }
+
+    with get_db_session() as session:
+        for src_name, tok, comp_name in targets:
+            adapter = adapters.get(src_name)
+            if not adapter:
+                continue
+            try:
+                postings = adapter.fetch(
+                    SourceQuery(token=tok, company_name=comp_name),
+                    force_refresh=force_refresh,
+                )
+                res = upsert_roles(session, postings)
+                session.commit()
+
+                total_fetched += len(postings)
+                total_new += res.new_count
+                total_refreshed += res.refreshed_count
+                total_closed += res.closed_count
+
+                table.add_row(
+                    f"{comp_name} ({tok})",
+                    src_name,
+                    str(len(postings)),
+                    str(res.new_count),
+                    str(res.refreshed_count),
+                    str(res.closed_count),
+                )
+            except Exception as exc:
+                console.print(f"[red]Error sourcing {src_name}:{tok} - {exc}[/red]")
+                table.add_row(f"{comp_name} ({tok})", src_name, "ERROR", "-", "-", "-")
+
+    console.print(table)
+    console.print(
+        f"[bold green]✓ Sourcing complete:[/bold green] "
+        f"{total_fetched} fetched, {total_new} new, {total_refreshed} refreshed, {total_closed} closed."
+    )
 
 
 @app.command()

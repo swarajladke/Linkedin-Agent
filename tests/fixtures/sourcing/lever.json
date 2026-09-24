@@ -1,0 +1,48 @@
+[
+  {
+    "id": "lever-301",
+    "text": "Senior ML Ops Engineer",
+    "createdAt": 1682942400000,
+    "hostedUrl": "https://jobs.lever.co/palantir/lever-301",
+    "applyUrl": "https://jobs.lever.co/palantir/lever-301/apply",
+    "categories": {
+      "location": "New York, NY",
+      "commitment": "Full-time",
+      "team": "Machine Learning",
+      "workplaceType": "remote"
+    },
+    "description": "<p>Design and deploy machine learning pipelines at scale.</p>",
+    "descriptionPlain": "Design and deploy machine learning pipelines at scale.",
+    "additional": "<p>Benefits include health insurance and equity.</p>",
+    "additionalPlain": "Benefits include health insurance and equity."
+  },
+  {
+    "id": "lever-302",
+    "text": "Engenheiro de Dados Sênior — São Paulo",
+    "createdAt": 1682946000000,
+    "hostedUrl": "https://jobs.lever.co/palantir/lever-302",
+    "applyUrl": "https://jobs.lever.co/palantir/lever-302/apply",
+    "categories": {
+      "location": "São Paulo, Brazil",
+      "commitment": "Tempo Integral",
+      "team": "Dados",
+      "workplaceType": "hybrid"
+    },
+    "description": "<p>Desenvolver pipelines de dados com Spark e Python.</p>",
+    "descriptionPlain": null,
+    "additional": null,
+    "additionalPlain": null
+  },
+  {
+    "id": "lever-303",
+    "text": "Site Reliability Engineer",
+    "createdAt": null,
+    "hostedUrl": "https://jobs.lever.co/palantir/lever-303",
+    "applyUrl": "https://jobs.lever.co/palantir/lever-303/apply",
+    "categories": null,
+    "description": null,
+    "descriptionPlain": null,
+    "additional": null,
+    "additionalPlain": null
+  }
+]

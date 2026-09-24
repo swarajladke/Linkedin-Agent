@@ -210,6 +210,123 @@ def test_full_migration_lifecycle_and_constraints(db_engine):
         assert pytest.approx(row[0], rel=1e-4) == 0.64
         trans.rollback()
 
-    # 6. Test downgrade to base and restore to head for subsequent tests
+    # 6. Test Migration 0002: UniqueConstraint on roles (source, external_id)
+    with db_engine.connect() as connection:
+        trans = connection.begin()
+        company_id = uuid.uuid4()
+        connection.execute(
+            text("INSERT INTO companies (id, name, domain) VALUES (:id, 'Test Co', 'test.com')"),
+            {"id": company_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO roles (
+                    id, company_id, title, location_type, source, external_id
+                ) VALUES (
+                    gen_random_uuid(), :company_id, 'Role 1', 'remote', 'greenhouse', 'gh_123'
+                )
+                """
+            ),
+            {"company_id": company_id},
+        )
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO roles (
+                        id, company_id, title, location_type, source, external_id
+                    ) VALUES (
+                        gen_random_uuid(), :company_id, 'Role 2 duplicate', 'remote', 'greenhouse', 'gh_123'
+                    )
+                    """
+                ),
+                {"company_id": company_id},
+            )
+        trans.rollback()
+
+    # 7. Test Migration 0002: CheckConstraint and UniqueConstraint on role_assessments
+    with db_engine.connect() as connection:
+        trans = connection.begin()
+        user_id = uuid.uuid4()
+        goal_id = uuid.uuid4()
+        company_id = uuid.uuid4()
+        role_id = uuid.uuid4()
+
+        connection.execute(
+            text(
+                "INSERT INTO users (id, email, full_name) VALUES (:id, 'm2@example.com', 'M2 Candidate')"
+            ),
+            {"id": user_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO goals (id, user_id, objective_text, constraints_json, target_spec, success_criteria, sub_goals, deadline)
+                VALUES (:goal_id, :user_id, 'AI Role', '{}', '{}', '{}', '[]', NOW() + INTERVAL '30 days')
+                """
+            ),
+            {"goal_id": goal_id, "user_id": user_id},
+        )
+        connection.execute(
+            text("INSERT INTO companies (id, name) VALUES (:id, 'Assess Co')"),
+            {"id": company_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO roles (id, company_id, title, location_type, source, external_id)
+                VALUES (:role_id, :company_id, 'Engineer', 'remote', 'ashby', 'ash_1')
+                """
+            ),
+            {"role_id": role_id, "company_id": company_id},
+        )
+
+        # Test CheckConstraint: fit_score > 1.0 must fail
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO role_assessments (
+                        id, role_id, goal_id, fit_score, fit_rationale, recommended_action, assessor_version
+                    ) VALUES (
+                        gen_random_uuid(), :role_id, :goal_id, 1.2, 'Too high', 'apply_now', 'v1'
+                    )
+                    """
+                ),
+                {"role_id": role_id, "goal_id": goal_id},
+            )
+
+        # Valid insertion
+        connection.execute(
+            text(
+                """
+                INSERT INTO role_assessments (
+                    id, role_id, goal_id, fit_score, fit_rationale, recommended_action, assessor_version
+                ) VALUES (
+                    gen_random_uuid(), :role_id, :goal_id, 0.85, 'Solid fit', 'apply_now', 'v1'
+                )
+                """
+            ),
+            {"role_id": role_id, "goal_id": goal_id},
+        )
+
+        # Test UniqueConstraint: duplicate (role_id, goal_id, assessor_version) must fail
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO role_assessments (
+                        id, role_id, goal_id, fit_score, fit_rationale, recommended_action, assessor_version
+                    ) VALUES (
+                        gen_random_uuid(), :role_id, :goal_id, 0.90, 'Duplicate', 'apply_now', 'v1'
+                    )
+                    """
+                ),
+                {"role_id": role_id, "goal_id": goal_id},
+            )
+        trans.rollback()
+
+    # 8. Test downgrade to base and restore to head for subsequent tests
     command.downgrade(alembic_cfg, "base")
     command.upgrade(alembic_cfg, "head")

@@ -1,0 +1,45 @@
+{
+  "jobs": [
+    {
+      "id": 101,
+      "title": "Senior Distributed Systems Engineer",
+      "updated_at": "2023-04-12T10:00:00Z",
+      "absolute_url": "https://boards.greenhouse.io/canonical/jobs/101",
+      "location": {
+        "name": "Remote, US"
+      },
+      "content": "&lt;p&gt;We are looking for a &lt;strong&gt;Senior Distributed Systems Engineer&lt;/strong&gt; to join our core infrastructure team.&lt;/p&gt;&lt;p&gt;Requirements:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;5+ years Python and Go&lt;/li&gt;&lt;li&gt;Kubernetes in production&lt;/li&gt;&lt;/ul&gt;",
+      "departments": [
+        {
+          "id": 1,
+          "name": "Engineering"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "title": "Ingénieur Données & IA 🚀 - Zurich",
+      "updated_at": "2023-04-13T12:00:00Z",
+      "absolute_url": "https://boards.greenhouse.io/canonical/jobs/102",
+      "location": {
+        "name": "Zürich, Switzerland"
+      },
+      "content": "<p>Concevoir des architectures de données modernes avec PyTorch et Kafka.</p>",
+      "departments": [
+        {
+          "id": 1,
+          "name": "Engineering"
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "title": "Staff Platform Engineer",
+      "updated_at": "2023-04-14T14:00:00Z",
+      "absolute_url": "https://boards.greenhouse.io/canonical/jobs/103",
+      "location": null,
+      "content": null,
+      "departments": []
+    }
+  ]
+}

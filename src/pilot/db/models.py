@@ -161,6 +161,9 @@ class Goal(Base):
     escalations: Mapped[list["Escalation"]] = relationship(
         "Escalation", back_populates="goal", cascade="all, delete-orphan"
     )
+    role_assessments: Mapped[list["RoleAssessment"]] = relationship(
+        "RoleAssessment", back_populates="goal", cascade="all, delete-orphan"
+    )
 
 
 class Strategy(Base):
@@ -276,7 +279,10 @@ class Role(Base):
     """Specific job openings targeted by the agent."""
 
     __tablename__ = "roles"
-    __table_args__ = (Index("ix_roles_company_id_status", "company_id", "status"),)
+    __table_args__ = (
+        Index("ix_roles_company_id_status", "company_id", "status"),
+        UniqueConstraint("source", "external_id", name="uq_roles_source_external_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -304,6 +310,23 @@ class Role(Base):
         nullable=False,
         server_default=RoleStatus.OPEN.value,
     )
+    source: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        server_default="manual",
+    )
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    raw_posting: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -315,6 +338,69 @@ class Role(Base):
     applications: Mapped[list["Application"]] = relationship(
         "Application", back_populates="role", cascade="all, delete-orphan"
     )
+    assessments: Mapped[list["RoleAssessment"]] = relationship(
+        "RoleAssessment", back_populates="role", cascade="all, delete-orphan"
+    )
+
+
+class RoleAssessment(Base):
+    """Assessment of a role's fit against a specific career goal, with supporting evidence claims and gaps."""
+
+    __tablename__ = "role_assessments"
+    __table_args__ = (
+        CheckConstraint(
+            "fit_score >= 0.0 AND fit_score <= 1.0", name="chk_role_assessments_fit_score"
+        ),
+        UniqueConstraint(
+            "role_id", "goal_id", "assessor_version", name="uq_role_assessments_role_goal_version"
+        ),
+        Index("ix_role_assessments_goal_fit", "goal_id", "fit_score"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
+    role_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("roles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    goal_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("goals.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    fit_score: Mapped[float] = mapped_column(Float, nullable=False)
+    fit_rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    supporting_claim_ids: Mapped[list[Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    )
+    skill_gaps: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    )
+    company_context: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    recommended_action: Mapped[str] = mapped_column(String(50), nullable=False)
+    assessed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    assessor_version: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    # Relationships
+    role: Mapped["Role"] = relationship("Role", back_populates="assessments")
+    goal: Mapped["Goal"] = relationship("Goal", back_populates="role_assessments")
 
 
 class Application(Base):

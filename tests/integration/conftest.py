@@ -281,7 +281,7 @@ def clean_db(ensure_schema):
     with get_db_session() as session:
         session.execute(
             text(
-                "TRUNCATE TABLE users, evidence_claims, goals, strategies, strategy_notes CASCADE;"
+                "TRUNCATE TABLE users, evidence_claims, goals, strategies, strategy_notes, companies, roles, role_assessments CASCADE;"
             )
         )
         session.commit()

@@ -1,0 +1,23 @@
+# Configured job boards for Pilot Sourcing
+# Format:
+#   source:
+#     - token: <board_token_or_org_slug>
+#       name: <Company Name>
+
+greenhouse:
+  - token: canonical
+    name: Canonical
+  - token: cloudflare
+    name: Cloudflare
+
+ashby:
+  - token: ramp
+    name: Ramp
+  - token: sentry
+    name: Sentry
+
+lever:
+  - token: palantir
+    name: Palantir
+  - token: atlassian
+    name: Atlassian

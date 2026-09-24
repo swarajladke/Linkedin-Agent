@@ -63,6 +63,9 @@ class RoleBase(BaseModel):
     posting_url: str | None = None
     requirements_summary: str | None = None
     status: RoleStatus = RoleStatus.OPEN
+    source: str = Field(default="manual", max_length=50)
+    external_id: str | None = Field(default=None, max_length=255)
+    raw_posting: dict[str, object] | None = None
 
 
 class RoleCreate(RoleBase):
@@ -71,6 +74,8 @@ class RoleCreate(RoleBase):
 
 class RoleRead(RoleBase):
     id: UUID
+    first_seen_at: datetime
+    last_seen_at: datetime
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

@@ -1,0 +1,38 @@
+{
+  "apiVersion": "0.1",
+  "jobs": [
+    {
+      "id": "ashby-201",
+      "title": "Backend Architect",
+      "department": "Core Platform",
+      "location": "San Francisco, CA",
+      "isRemote": true,
+      "publishedAt": "2023-05-01T15:00:00.000Z",
+      "jobUrl": "https://jobs.ashbyhq.com/ramp/ashby-201",
+      "descriptionPlain": "Build scalable financial infrastructure with Python and Postgres."
+    },
+    {
+      "id": "ashby-202",
+      "title": "Lead Développeur Backend München",
+      "department": "Engineering",
+      "location": {
+        "locationName": "München, Germany"
+      },
+      "isRemote": false,
+      "publishedAt": "2023-05-02T16:00:00.000Z",
+      "jobUrl": "https://jobs.ashbyhq.com/ramp/ashby-202",
+      "descriptionHtml": "<p>Leitung des Backend-Teams für verteilte Systeme.</p>"
+    },
+    {
+      "id": "ashby-203",
+      "title": "Machine Learning Engineer",
+      "department": "AI Labs",
+      "location": null,
+      "isRemote": false,
+      "publishedAt": null,
+      "jobUrl": "https://jobs.ashbyhq.com/ramp/ashby-203",
+      "descriptionPlain": null,
+      "descriptionHtml": null
+    }
+  ]
+}
