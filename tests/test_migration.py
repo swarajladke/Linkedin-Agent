@@ -40,11 +40,9 @@ def test_full_migration_lifecycle_and_constraints(db_engine):
     # 1. Run upgrade to head
     command.upgrade(alembic_cfg, "head")
 
+    # 2. Assert zero schema diff between Base.metadata and live DB
     with db_engine.connect() as connection:
-        # Register pgvector dialect type mapping
         connection.dialect.ischema_names["vector"] = pgvector.sqlalchemy.Vector
-
-        # 2. Assert zero schema diff between Base.metadata and live DB
         migration_context = MigrationContext.configure(
             connection,
             opts={"compare_type": custom_compare_type, "compare_server_default": True},
@@ -52,9 +50,9 @@ def test_full_migration_lifecycle_and_constraints(db_engine):
         diff = compare_metadata(migration_context, Base.metadata)
         assert diff == [], f"Autogenerate diff is not empty: {diff}"
 
-        # 3. Test CheckConstraint: action predicted_probability in [0, 1]
+    # 3. Test CheckConstraint: action predicted_probability in [0, 1]
+    with db_engine.connect() as connection:
         trans = connection.begin()
-        # Seed user, goal, strategy
         user_id = uuid.uuid4()
         goal_id = uuid.uuid4()
         strategy_id = uuid.uuid4()
@@ -105,7 +103,8 @@ def test_full_migration_lifecycle_and_constraints(db_engine):
             )
         trans.rollback()
 
-        # 4. Test UniqueConstraint on evidence_claims (entity_id, content_hash)
+    # 4. Test UniqueConstraint on evidence_claims (entity_id, content_hash)
+    with db_engine.connect() as connection:
         trans = connection.begin()
         claim_entity_id = uuid.uuid4()
         test_hash = "a" * 64
@@ -136,7 +135,8 @@ def test_full_migration_lifecycle_and_constraints(db_engine):
             )
         trans.rollback()
 
-        # 5. Test automatic Brier score trigger computation
+    # 5. Test automatic Brier score trigger computation
+    with db_engine.connect() as connection:
         trans = connection.begin()
         user_id = uuid.uuid4()
         goal_id = uuid.uuid4()
