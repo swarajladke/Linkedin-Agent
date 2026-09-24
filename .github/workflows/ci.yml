@@ -53,8 +53,16 @@ jobs:
           alembic upgrade head
           alembic check
 
-      - name: Run Test Suite (Alembic & Constraints)
+      - name: Run Unit Tests
         env:
           DATABASE_URL: postgresql+psycopg://pilot:pilot_password@localhost:5432/pilot
           PILOT_ENV: test
-        run: pytest -v
+        run: pytest -v -m "not integration"
+
+      - name: Run Integration Tests
+        env:
+          DATABASE_URL: postgresql+psycopg://pilot:pilot_password@localhost:5432/pilot
+          PILOT_ENV: test
+        run: |
+          alembic upgrade head
+          pytest -v -m "integration"

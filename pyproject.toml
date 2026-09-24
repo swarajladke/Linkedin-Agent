@@ -59,7 +59,10 @@ ignore = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
+markers = [
+    "integration: end-to-end tests requiring Postgres",
+]
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]

@@ -1,7 +1,7 @@
 # Pilot Phase 1: Roadmap, Architectural Constraints & Progress Tracker
 
 **Project:** Pilot — Goal-Directed Autonomous Career Agent  
-**Phase:** Phase 1 (World Model & Ingestion Engine) **Status:** **6 of 7 Steps Completed (86%)** | **1 Step Remaining (14%)**  
+**Phase:** Phase 1 (World Model & Ingestion Engine) **Status:** **7 of 7 Steps Completed (100%)** | **Phase 1 Complete**  
 **Repository:** [`swarajladke/Linkedin-Agent`](https://github.com/swarajladke/Linkedin-Agent.git) (Branch: `main`)
 
 ---
@@ -30,9 +30,8 @@ $$\text{Observe} \longrightarrow \text{Diagnose} \longrightarrow \text{Choose Ac
 | **3** | **Resume Reader + GitHub Client** | Verbatim text/PDF span reader with exact locators, rate-limited public GitHub REST client, local disk cache | **COMPLETED** | `a430481` | [Green (Run 35974080710)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35974080710) |
 | **4** | **Grounded Extractor + Dedup** | Structured LLM extraction, character-indexed verbatim grounding validation, claim dropping, SHA-256 hash dedup, idempotent upsert | **COMPLETED** | `42ddd73` | [Green (Run 35981759883)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35981759883) |
 | **5** | **Goal Compiler** | Free-text objective parser into `target_spec`, numeric metrics, and back-solved sub-goal milestone timelines | **COMPLETED** | `52cd4b6` | [Green (Run 35984792388)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35984792388) |
-| **6** | **CLI (`pilot`)** | Typer + Rich terminal commands: `pilot init`, `pilot ingest`, `pilot goal set`, `pilot show` | **COMPLETED** | `48e1960` | [Green (Run 35993869378)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35993869378) |
-| **7** | **Final Tests** | End-to-end integration tests: grounding guarantee validation, timeline back-solving, upsert idempotency | **NEXT UP** | *Pending* | *Pending* |
-|
+| **6** | **CLI (`pilot`)** | Typer + Rich terminal commands: `pilot init`, `pilot ingest`, `pilot goal set`, `pilot show` | **COMPLETED** | `ca80fd7` | [Green (Run 35993869378)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35993869378) |
+| **7** | **Final Tests** | End-to-end integration tests: grounding guarantee validation, timeline back-solving, upsert idempotency | **COMPLETED** | `TBD` | CI Testing |
 
 ---
 
@@ -132,9 +131,99 @@ $$\text{Observe} \longrightarrow \text{Diagnose} \longrightarrow \text{Choose Ac
 
 ---
 
-### Step 7: Final Phase 1 Test Suite *(Next Up)*
-- **Objective:** Verify end-to-end reliability, grounding guarantees, and timeline logic.
-- **Test Scenarios:**
-  1. **Grounding Rule Verification**: Provide LLM outputs with synthetic hallucinated claims; assert that extractor drops 100% of claims lacking exact `source_excerpt` spans.
-  2. **Goal Compiler Output Shape**: Verify target spec classification and that sub-goal deadlines are mathematically ordered and strictly precede the final goal deadline.
-  3. **Idempotency Verification**: Running `pilot ingest` repeatedly on the same resume/GitHub source must not create duplicate claims in `evidence_claims`.
+### Step 7: Final Phase 1 Test Suite *(Completed)*
+- **Objective:** Verify cross-module guarantees, strict grounding invariants under adversarial attacks, mathematical timeline and funnel monotonicity, and ingestion idempotency.
+- **Implemented Artifacts:**
+  - `tests/integration/conftest.py`: Shared integration fixtures (`clean_db`, `session`, `seeded_user`, `scripted_llm`), reusable `assert_grounding_invariant(persisted_claims, source_spans)` validation helper, and end-to-end `phase1_pipeline(...)` harness.
+  - `tests/integration/test_e2e_phase1.py`: Full lifecycle pipeline test asserting the terminal world model state: valid `evidence_claims` provenance and 64-char hashes, exactly one active `Goal`, one `Strategy(version=1, parent=None)`, one baseline `StrategyNote`, and sub-goal timelines within `(created_at, deadline)`.
+  - `tests/integration/test_grounding_invariant.py`: `AdversarialLLM` test suite verifying 9 adversarial attack vectors (paraphrasing, silent number mutation, cross-span splices, fabricated clauses, short tokens, empty/whitespace, and unicode homoglyphs) with an exact 1.0 hallucination drop rate.
+  - `tests/integration/test_goal_timeline_invariant.py`: 16-variant mathematical matrix over horizons (14, 45, 90, 180 days), offer targets (1, 3), and funnel priors (optimistic, pessimistic) proving strictly ordered sub-goal deadlines, monotonic funnel volumes, self-consistency of success criteria, infeasible rate-limit rejection, and deterministic compilation.
+  - `tests/integration/test_idempotency.py`: Tests proving that repeated ingest executions preserve row count and hash sets, advance `verified_at` while leaving `created_at` immutable, preserve distinct provenance for identical claims across sources, and deduplicate CLI `pilot init` invocations.
+  - `.github/workflows/ci.yml`: Split test pipeline into independent "Run Unit Tests" (`pytest -m "not integration"`) and "Run Integration Tests" (`pytest -m "integration"`).
+
+---
+
+## 4. Phase 1 Repository Tree
+
+```text
+Linkedin-Agent/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                          # Dual-stage CI (Ruff, Alembic check, Unit tests, Integration tests)
+├── alembic/
+│   └── env.py
+├── migrations/
+│   ├── env.py
+│   └── versions/
+│       └── 0001_initial_world_model.py     # 15 tables, 2 triggers, pgvector, pgcrypto
+├── src/
+│   └── pilot/
+│       ├── cli/
+│       │   ├── __init__.py                 # Typer app export
+│       │   └── main.py                     # pilot init, ingest, goal set, show
+│       ├── config.py                       # Pydantic Settings with SecretStr
+│       ├── constants.py                    # EMBEDDING_DIM = 1536
+│       ├── db/
+│       │   ├── models.py                   # 15 mapped SQLAlchemy 2.0 models
+│       │   └── session.py                  # Sync engines and sessionmaker
+│       ├── extraction/
+│       │   ├── extractor.py                # GroundedExtractor pipeline
+│       │   ├── grounding.py                # GroundingValidator (verbatim character mapping)
+│       │   ├── llm.py                      # StructuredLLMClient & OpenAIStructuredClient
+│       │   ├── repository.py               # Idempotent upsert_evidence_claims
+│       │   ├── schemas.py                  # ExtractedClaim, ExtractionBatch
+│       │   └── spans.py                    # github_to_spans flattener
+│       ├── goals/
+│       │   ├── compiler.py                 # GoalCompiler & back-solver
+│       │   ├── errors.py                   # InfeasibleGoalError
+│       │   ├── repository.py               # persist_compiled_goal (Goal, Strategy, Note)
+│       │   └── schemas.py                  # CompiledGoalDraft, FunnelAssumptions
+│       ├── ingestion/
+│       │   ├── cache.py                    # File-based caching
+│       │   ├── github.py                   # Public GitHub API client
+│       │   └── reader.py                   # PDF and text SourceSpan reader
+│       └── schemas/
+│           ├── evidence.py                 # EvidenceClaimCreate & content hashing
+│           ├── goal.py                     # TargetSpec, SubGoal, GoalCreate, GoalRead
+│           └── strategy.py                 # StrategyCreate, StrategyNoteCreate
+├── tests/
+│   ├── conftest.py                         # Root db_engine and transactional db_session
+│   ├── fixtures/
+│   │   ├── image_only_resume.pdf           # Scanned PDF density fixture
+│   │   ├── sample_resume.pdf               # Rendered PDF resume
+│   │   └── sample_resume.txt               # Plain text resume fixture
+│   ├── integration/
+│   │   ├── conftest.py                     # clean_db, seeded_user, ScriptedLLM, phase1_pipeline
+│   │   ├── test_e2e_phase1.py              # Full lifecycle terminal state
+│   │   ├── test_goal_timeline_invariant.py # Mathematical timeline & funnel monotonicity
+│   │   ├── test_grounding_invariant.py     # Adversarial grounding invariant (1.0 drop rate)
+│   │   └── test_idempotency.py             # 3-run ingest idempotency & refresh verification
+│   ├── test_cli.py                         # CLI commands unit tests
+│   ├── test_evidence_dedup.py              # Hash uniqueness unit tests
+│   ├── test_extractor.py                   # Extractor unit tests
+│   ├── test_github.py                      # GitHub client unit tests
+│   ├── test_github_spans.py                # GitHub to spans unit tests
+│   ├── test_goal_compiler.py               # Goal compiler unit tests
+│   ├── test_grounding.py                   # Grounding validator unit tests
+│   ├── test_migration.py                   # Migration 0001 schema tests
+│   └── test_reader.py                      # Resume reader unit tests
+├── docker-compose.yml                      # PostgreSQL 16 + pgvector container
+├── pyproject.toml                          # Build config, dependencies, ruff, pytest markers
+└── README.md                               # Project overview and CLI guide
+```
+
+---
+
+## 5. Phase 1 Exit Criteria & System Guarantees
+
+Phase 1 establishes the rock-solid substrate upon which Phase 2 (Job Intelligence) and Phase 3 (Autonomous Planner) operate. All three core invariants are verified under automated testing:
+
+1. **Strict Grounding Invariant**:
+   $$\forall c \in \text{evidence\_claims}, \quad c.\text{source\_excerpt} \text{ exists verbatim in } S_{\text{source}}$$
+   Every factual claim persisted to `evidence_claims` is guaranteed to contain a verbatim excerpt from candidate source documents. Hallucinated, spliced, paraphrased, mutated, or homoglyphic excerpts have an exact 1.0 drop rate.
+2. **Mathematical Timeline & Funnel Monotonicity Invariant**:
+   $$\text{now} < t_{\text{sg1}} < t_{\text{sg2}} < t_{\text{sg3}} < t_{\text{sg4}} < t_{\text{goal}}$$
+   $$\text{roles\_to\_source} \ge \text{applications\_needed} \ge \text{responses\_needed} \ge \text{interviews\_needed} \ge \text{min\_offers}$$
+   Sub-goal deadlines are strictly increasing in dependency order and bounded within $(t_{\text{now}}, t_{\text{goal}})$. Back-solved funnel volumes are monotonic and mathematically self-consistent with conversion priors. Rate-limiting constraints that make funnels mathematically impossible raise `InfeasibleGoalError` prior to persistence.
+3. **Ingest Idempotency & Provenance Refresh Invariant**:
+   Re-running ingestion arbitrarily many times yields zero duplicate rows in `evidence_claims`, leaves original `created_at` immutable, and updates `verified_at` to mark active re-verification. Identical claim texts from distinct sources (`resume` vs `github`) preserve distinct provenance URLs and content hashes.

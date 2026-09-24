@@ -210,5 +210,6 @@ def test_full_migration_lifecycle_and_constraints(db_engine):
         assert pytest.approx(row[0], rel=1e-4) == 0.64
         trans.rollback()
 
-    # 6. Test downgrade to base
+    # 6. Test downgrade to base and restore to head for subsequent tests
     command.downgrade(alembic_cfg, "base")
+    command.upgrade(alembic_cfg, "head")

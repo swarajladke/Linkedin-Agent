@@ -17,7 +17,7 @@ The core objective of Pilot is **auditable decision-making and learning from pre
 
 ---
 
-## Phase 1 Deliverables (In Progress)
+## Phase 1 Deliverables (Complete)
 
 - [x] **1. Scaffold + Docker Compose + Config**: Pyproject, Ruff, Pytest, Docker Compose (PostgreSQL 16 + pgvector), Pydantic Settings.
 - [x] **2. Models + Migration 0001**: SQLAlchemy 2.0 models and Alembic migration for all core tables.
@@ -25,7 +25,7 @@ The core objective of Pilot is **auditable decision-making and learning from pre
 - [x] **4. Grounded Extractor + Deduplication**: Structured LLM extraction with validation, content-hash deduplication, and strict provenance enforcement.
 - [x] **5. Goal Compiler**: Objective & constraints parser into target specs, numeric success criteria, and back-solved sub-goal timelines.
 - [x] **6. CLI**: `pilot init`, `pilot ingest`, `pilot goal set`, `pilot show`.
-- [ ] **7. Tests**: Test suite for grounding validation, claim deduplication, and goal compiler timeline resolution.
+- [x] **7. Tests**: End-to-end integration and invariant test suite (grounding guarantee, mathematical timelines, idempotency).
 
 ---
 
