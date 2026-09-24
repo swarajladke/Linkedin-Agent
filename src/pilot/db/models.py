@@ -164,6 +164,9 @@ class Goal(Base):
     role_assessments: Mapped[list["RoleAssessment"]] = relationship(
         "RoleAssessment", back_populates="goal", cascade="all, delete-orphan"
     )
+    cycles: Mapped[list["Cycle"]] = relationship(
+        "Cycle", back_populates="goal", cascade="all, delete-orphan"
+    )
 
 
 class Strategy(Base):
@@ -211,6 +214,7 @@ class Strategy(Base):
         "Calibration", back_populates="strategy"
     )
     notes: Mapped[list["StrategyNote"]] = relationship("StrategyNote", back_populates="strategy")
+    cycles: Mapped[list["Cycle"]] = relationship("Cycle", back_populates="strategy")
 
 
 class Company(Base):
@@ -497,6 +501,67 @@ class Conversation(Base):
 # ============================================================================
 # Actions, Predictions & Learning Loop
 # ============================================================================
+class Cycle(Base):
+    """Unit of replay and execution representing one observe-diagnose-act cycle for a goal."""
+
+    __tablename__ = "cycles"
+    __table_args__ = (
+        UniqueConstraint("goal_id", "cycle_number", name="uq_cycles_goal_id_cycle_number"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
+    goal_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("goals.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    cycle_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    strategy_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("strategies.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    observation: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    diagnosis: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    actions_proposed: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+    actions_selected: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+
+    # Relationships
+    goal: Mapped["Goal"] = relationship("Goal", back_populates="cycles")
+    strategy: Mapped[Optional["Strategy"]] = relationship("Strategy", back_populates="cycles")
+    actions: Mapped[list["Action"]] = relationship("Action", back_populates="cycle")
+
+
 class Action(Base):
     """Every autonomous action executed by the agent with mandatory falsifiable predictions."""
 
@@ -508,6 +573,7 @@ class Action(Base):
         ),
         Index("ix_actions_goal_id_created_at", "goal_id", "created_at"),
         Index("ix_actions_strategy_id", "strategy_id"),
+        Index("ix_actions_cycle_id", "cycle_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -525,6 +591,11 @@ class Action(Base):
         UUID(as_uuid=True),
         ForeignKey("strategies.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    cycle_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cycles.id", ondelete="SET NULL"),
+        nullable=True,
     )
     action_type: Mapped[str] = mapped_column(String(100), nullable=False)
     target_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -549,6 +620,7 @@ class Action(Base):
     # Relationships
     goal: Mapped["Goal"] = relationship("Goal", back_populates="actions")
     strategy: Mapped["Strategy"] = relationship("Strategy", back_populates="actions")
+    cycle: Mapped[Optional["Cycle"]] = relationship("Cycle", back_populates="actions")
     outcome: Mapped[Optional["ActionOutcome"]] = relationship(
         "ActionOutcome",
         back_populates="action",
