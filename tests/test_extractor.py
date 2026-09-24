@@ -284,7 +284,7 @@ def test_extractor_batches_spans_by_budget():
         SourceSpan(text="Span 2 text with twenty chars", locator="2", source_url="url"),
         SourceSpan(text="Span 3 text with twenty chars", locator="3", source_url="url"),
     ]
-    # Set budget to 35 chars so 3 spans require 2 batches
+    # Set budget to 60 chars so 3 spans of ~29 chars require 2 batches
     fake_llm = FakeLLM(
         [
             ExtractionBatch(claims=[]),
@@ -292,7 +292,7 @@ def test_extractor_batches_spans_by_budget():
         ]
     )
 
-    extractor = GroundedExtractor(llm=fake_llm, batch_chars=35)
+    extractor = GroundedExtractor(llm=fake_llm, batch_chars=60)
     extractor.extract(
         spans=spans,
         entity_type="user",

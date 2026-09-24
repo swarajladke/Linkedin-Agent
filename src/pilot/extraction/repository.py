@@ -39,8 +39,8 @@ def upsert_evidence_claims(session: Session, claims: list[EvidenceClaimCreate]) 
             "source_excerpt": stmt.excluded.source_excerpt,
             "verified_at": func.now(),
         },
-    )
+    ).returning(EvidenceClaim.id)
 
-    result = session.execute(upsert_stmt)
+    affected_ids = session.scalars(upsert_stmt).all()
     session.flush()
-    return result.rowcount
+    return len(affected_ids)
