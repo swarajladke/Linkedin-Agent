@@ -121,7 +121,12 @@ class Goal(Base):
     sub_goals: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[GoalStatus] = mapped_column(
-        Enum(GoalStatus, name="goal_status", native_enum=True),
+        Enum(
+            GoalStatus,
+            name="goal_status",
+            native_enum=True,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
         nullable=False,
         server_default=GoalStatus.ACTIVE.value,
     )
@@ -290,7 +295,12 @@ class Role(Base):
     posting_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     requirements_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[RoleStatus] = mapped_column(
-        Enum(RoleStatus, name="role_status", native_enum=True),
+        Enum(
+            RoleStatus,
+            name="role_status",
+            native_enum=True,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
         nullable=False,
         server_default=RoleStatus.OPEN.value,
     )
@@ -330,7 +340,12 @@ class Application(Base):
         nullable=False,
     )
     stage: Mapped[ApplicationStage] = mapped_column(
-        Enum(ApplicationStage, name="application_stage", native_enum=True),
+        Enum(
+            ApplicationStage,
+            name="application_stage",
+            native_enum=True,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
         nullable=False,
         server_default=ApplicationStage.DISCOVERED.value,
     )
@@ -632,7 +647,12 @@ class StrategyNote(Base):
     hypothesis: Mapped[str] = mapped_column(Text, nullable=False)
     reflection: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[StrategyNoteStatus] = mapped_column(
-        Enum(StrategyNoteStatus, name="strategy_note_status", native_enum=True),
+        Enum(
+            StrategyNoteStatus,
+            name="strategy_note_status",
+            native_enum=True,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
         nullable=False,
         server_default=StrategyNoteStatus.ACTIVE.value,
     )
