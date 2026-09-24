@@ -42,5 +42,6 @@ def upsert_evidence_claims(session: Session, claims: list[EvidenceClaimCreate]) 
     ).returning(EvidenceClaim.id)
 
     affected_ids = session.scalars(upsert_stmt).all()
+    session.expire_all()
     session.flush()
     return len(affected_ids)
