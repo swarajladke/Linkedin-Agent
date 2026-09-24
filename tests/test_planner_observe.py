@@ -4,6 +4,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
+import pytest
+
 from pilot.db.models import ApplicationStage, Goal, GoalStatus
 from pilot.planner.observe import _safe_div, observe
 from pilot.planner.schemas import Observation
@@ -89,15 +91,15 @@ def test_observe_deterministic_and_pure():
     assert obs.funnel_counts.offers == 1
 
     # Conversion rates
-    assert obs.conversion_rates.sourcing_to_assessed == 0.5
-    assert obs.conversion_rates.assessed_to_applied == round(11 / 25, 4)
-    assert obs.conversion_rates.applied_to_response == round(3 / 11, 4)
+    assert obs.conversion_rates.sourcing_to_assessed == pytest.approx(0.5)
+    assert obs.conversion_rates.assessed_to_applied == pytest.approx(11 / 25, abs=1e-4)
+    assert obs.conversion_rates.applied_to_response == pytest.approx(3 / 11, abs=1e-4)
 
     # Timeline
     assert obs.timeline.elapsed_days == 30.0
     assert obs.timeline.remaining_days == 60.0
     assert obs.timeline.total_days == 90.0
-    assert obs.timeline.pace_fraction == round(30.0 / 90.0, 4)
+    assert obs.timeline.pace_fraction == pytest.approx(30.0 / 90.0, abs=1e-4)
 
     # Sub-goals
     assert len(obs.sub_goal_progress) == 3

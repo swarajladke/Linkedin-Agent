@@ -55,10 +55,10 @@ OFFER_STAGES = {
 
 
 def _safe_div(numerator: float, denominator: float) -> float:
-    """Safe division returning 0.0 on zero-denominator, clamped to [0.0, 1.0]."""
+    """Safe division returning 0.0 on zero-denominator, clamped to [0.0, 1.0] rounded to 4 decimals."""
     if denominator <= 0.0:
         return 0.0
-    return min(1.0, max(0.0, float(numerator) / float(denominator)))
+    return round(min(1.0, max(0.0, float(numerator) / float(denominator))), 4)
 
 
 def observe(session: Session, goal: Goal, *, now: datetime) -> Observation:
