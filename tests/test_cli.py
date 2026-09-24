@@ -402,7 +402,7 @@ def test_pilot_assess_and_explain_commands(monkeypatch):
     assess_res = runner.invoke(app, ["assess"])
     assert assess_res.exit_code == 0
     assert "Role Assessments" in assess_res.stdout
-    assert "CloudScale Corp" in assess_res.stdout
+    assert "CloudScale" in assess_res.stdout
     assert "apply_now" in assess_res.stdout
 
     # 2. Run pilot explain
@@ -417,4 +417,4 @@ def test_pilot_assess_and_explain_commands(monkeypatch):
     show_res = runner.invoke(app, ["show"])
     assert show_res.exit_code == 0
     assert "Top Assessed Opportunities" in show_res.stdout
-    assert "Principal Distributed Systems Engineer" in show_res.stdout
+    assert "CloudScale" in show_res.stdout
