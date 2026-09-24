@@ -1,0 +1,16 @@
+# Alex Candidate
+Email: alex.candidate@example.com | GitHub: https://github.com/alexcandidate
+Location: Bangalore, India
+
+## Summary
+Applied AI Engineer with 4 years of experience designing and deploying production LLM inference pipelines, multi-agent frameworks, and vector search systems.
+
+## Experience
+Senior AI Engineer | TechCorp Inc.
+- Designed and deployed low-latency inference pipelines using vLLM and TensorRT-LLM, reducing latency by 45%.
+- Built automated evaluation harness measuring exact-match and semantic accuracy across 10,000 benchmark queries.
+- Spearheaded retrieval-augmented generation (RAG) architecture using pgvector and hybrid BM25 search.
+
+## Projects
+- Autonomous Evaluation Engine: Built self-calibrating agent with falsifiable prediction logs.
+- High-Throughput Token Batcher: Custom token scheduling system in Python and C++.

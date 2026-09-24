@@ -45,6 +45,7 @@ venv.bak/
 .ruff_cache/
 .coverage
 htmlcov/
+.cache/
 
 # Postgres local data
 postgres_data/
