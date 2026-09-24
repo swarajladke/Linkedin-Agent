@@ -23,7 +23,7 @@ The core objective of Pilot is **auditable decision-making and learning from pre
 - [x] **2. Models + Migration 0001**: SQLAlchemy 2.0 models and Alembic migration for all core tables.
 - [x] **3. Resume Reader + GitHub Client**: Deterministic raw text and document extraction without LLM.
 - [x] **4. Grounded Extractor + Deduplication**: Structured LLM extraction with validation, content-hash deduplication, and strict provenance enforcement.
-- [ ] **5. Goal Compiler**: Objective & constraints parser into target specs, numeric success criteria, and back-solved sub-goal timelines.
+- [x] **5. Goal Compiler**: Objective & constraints parser into target specs, numeric success criteria, and back-solved sub-goal timelines.
 - [ ] **6. CLI**: `pilot init`, `pilot ingest`, `pilot goal set`, `pilot show`.
 - [ ] **7. Tests**: Test suite for grounding validation, claim deduplication, and goal compiler timeline resolution.
 

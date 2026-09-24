@@ -1,8 +1,7 @@
 # Pilot Phase 1: Roadmap, Architectural Constraints & Progress Tracker
 
 **Project:** Pilot — Goal-Directed Autonomous Career Agent  
-**Phase:** Phase 1 (World Model & Ingestion Engine)  
-**Status:** **4 of 7 Steps Completed (57%)** | **3 Steps Remaining (43%)**  
+**Phase:** Phase 1 (World Model & Ingestion Engine) **Status:** **5 of 7 Steps Completed (71%)** | **2 Steps Remaining (29%)**  
 **Repository:** [`swarajladke/Linkedin-Agent`](https://github.com/swarajladke/Linkedin-Agent.git) (Branch: `main`)
 
 ---
@@ -25,14 +24,15 @@ $$\text{Observe} \longrightarrow \text{Diagnose} \longrightarrow \text{Choose Ac
 ## 2. Progress Dashboard
 
 | # | Step Name | Scope & Key Deliverables | Status | Commit SHA | CI Status |
-| :-: | :--- | :--- | :-: | :---: | :-: |
+| :-: | :--- | :--- | :-: | :---: | :---: |
 | **1** | **Scaffold + Docker + Config** | Pyproject, Ruff, Pytest, Docker Compose (pgvector 16), Pydantic Settings (`SecretStr`) | **COMPLETED** | `c84ffa1` | Verified |
 | **2** | **World Model + Migration 0001** | 15 SQLAlchemy 2.0 models, Alembic sync migration, polymorphic discriminators, Brier trigger, constraints | **COMPLETED** | `da9d9d2` | [Green (Run 35972591152)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35972591152) |
 | **3** | **Resume Reader + GitHub Client** | Verbatim text/PDF span reader with exact locators, rate-limited public GitHub REST client, local disk cache | **COMPLETED** | `a430481` | [Green (Run 35974080710)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35974080710) |
-| **4** | **Grounded Extractor + Dedup** | Structured LLM extraction, provenance validation against spans, claim dropping, SHA-256 hash deduplication | **COMPLETED** | Pending commit | Running in CI |
-| **5** | **Goal Compiler** | Free-text objective parser into `target_spec`, numeric metrics, and back-solved sub-goal milestone timelines | **NEXT UP** | *Pending* | *Pending* |
-| **6** | **CLI (`pilot`)** | Typer + Rich terminal commands: `pilot init`, `pilot ingest`, `pilot goal set`, `pilot show` | **REMAINING** | *Pending* | *Pending* |
+| **4** | **Grounded Extractor + Dedup** | Structured LLM extraction, character-indexed verbatim grounding validation, claim dropping, SHA-256 hash dedup, idempotent upsert | **COMPLETED** | `42ddd73` | [Green (Run 35981759883)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35981759883) |
+| **5** | **Goal Compiler** | Free-text objective parser into `target_spec`, numeric metrics, and back-solved sub-goal milestone timelines | **COMPLETED** | Pending commit | Running in CI |
+| **6** | **CLI (`pilot`)** | Typer + Rich terminal commands: `pilot init`, `pilot ingest`, `pilot goal set`, `pilot show` | **NEXT UP** | *Pending* | *Pending* |
 | **7** | **Final Tests** | End-to-end integration tests: grounding guarantee validation, timeline back-solving, upsert idempotency | **REMAINING** | *Pending* | *Pending* |
+|
 
 ---
 
@@ -108,19 +108,18 @@ $$\text{Observe} \longrightarrow \text{Diagnose} \longrightarrow \text{Choose Ac
 
 ---
 
-### Step 5: Goal Compiler *(Next Up)*
+### Step 5: Goal Compiler *(Completed)*
 - **Objective:** Translate human natural language career objectives and constraints into a machine-executable, time-sequenced world model goal.
-- **Specifications:**
-  - **Input:** Raw objective string (e.g., *"Land an Applied AI Engineer role, remote or Bangalore, by Dec 1"*) and constraints dict.
-  - **Output Schema:**
-    - `target_spec`: Breakdown into `must_have`, `nice_to_have`, and `unstated_but_real` (implicit industry table-stakes).
-    - `success_criteria`: Quantitative targets (e.g., minimum offers, salary threshold, role seniority level).
-    - `sub_goals`: Sequenced milestones back-solved from the deadline (e.g., portfolio readiness by Week 2, target pipeline of 30 roles by Week 4, interview conversions by Week 7).
-  - Persists directly into the `goals` table and initializes version 1 in `strategies`.
+- **Implemented Artifacts:**
+  - `src/pilot/goals/schemas.py`: `CompiledGoalDraft` and `FunnelAssumptions` models.
+  - `src/pilot/goals/errors.py`: `InfeasibleGoalError` for invalid or mathematically unachievable goals.
+  - `src/pilot/goals/compiler.py`: `GoalCompiler` implementing pure compilation, numeric sanitization of `success_criteria`, deterministic Python back-solving of funnel volumes (`interviews_needed`, `applications_needed`, `roles_to_source`), and strictly ordered sub-goal timelines within `(now, deadline)`.
+  - `src/pilot/goals/repository.py`: `persist_compiled_goal` inserting `Goal`, `Strategy(version=1)`, and baseline `StrategyNote(hypothesis=...)`, with automatic transition of existing active goals to `GoalStatus.PAUSED`.
+  - `tests/test_goal_compiler.py`: 6 tests verifying classification shape, numeric sanitization, mathematical volume correctness, deadline ordering, infeasibility errors, and DB persistence.
 
 ---
 
-### Step 6: CLI Interface *(Remaining)*
+### Step 6: CLI Interface *(Next Up)*
 - **Objective:** Provide developer and candidate terminal control over the agent state.
 - **Commands:**
   1. `pilot init`: Initialize database connections, execute migrations, and register/verify the candidate user.
