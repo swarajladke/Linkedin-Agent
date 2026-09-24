@@ -1,7 +1,7 @@
 # Pilot Phase 1: Roadmap, Architectural Constraints & Progress Tracker
 
 **Project:** Pilot — Goal-Directed Autonomous Career Agent  
-**Phase:** Phase 1 (World Model & Ingestion Engine) **Status:** **5 of 7 Steps Completed (71%)** | **2 Steps Remaining (29%)**  
+**Phase:** Phase 1 (World Model & Ingestion Engine) **Status:** **6 of 7 Steps Completed (86%)** | **1 Step Remaining (14%)**  
 **Repository:** [`swarajladke/Linkedin-Agent`](https://github.com/swarajladke/Linkedin-Agent.git) (Branch: `main`)
 
 ---
@@ -30,8 +30,8 @@ $$\text{Observe} \longrightarrow \text{Diagnose} \longrightarrow \text{Choose Ac
 | **3** | **Resume Reader + GitHub Client** | Verbatim text/PDF span reader with exact locators, rate-limited public GitHub REST client, local disk cache | **COMPLETED** | `a430481` | [Green (Run 35974080710)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35974080710) |
 | **4** | **Grounded Extractor + Dedup** | Structured LLM extraction, character-indexed verbatim grounding validation, claim dropping, SHA-256 hash dedup, idempotent upsert | **COMPLETED** | `42ddd73` | [Green (Run 35981759883)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35981759883) |
 | **5** | **Goal Compiler** | Free-text objective parser into `target_spec`, numeric metrics, and back-solved sub-goal milestone timelines | **COMPLETED** | `52cd4b6` | [Green (Run 35984792388)](https://github.com/swarajladke/Linkedin-Agent/actions/runs/35984792388) |
-| **6** | **CLI (`pilot`)** | Typer + Rich terminal commands: `pilot init`, `pilot ingest`, `pilot goal set`, `pilot show` | **NEXT UP** | *Pending* | *Pending* |
-| **7** | **Final Tests** | End-to-end integration tests: grounding guarantee validation, timeline back-solving, upsert idempotency | **REMAINING** | *Pending* | *Pending* |
+| **6** | **CLI (`pilot`)** | Typer + Rich terminal commands: `pilot init`, `pilot ingest`, `pilot goal set`, `pilot show` | **COMPLETED** | Pending commit | Running in CI |
+| **7** | **Final Tests** | End-to-end integration tests: grounding guarantee validation, timeline back-solving, upsert idempotency | **NEXT UP** | *Pending* | *Pending* |
 |
 
 ---
@@ -119,17 +119,20 @@ $$\text{Observe} \longrightarrow \text{Diagnose} \longrightarrow \text{Choose Ac
 
 ---
 
-### Step 6: CLI Interface *(Next Up)*
+### Step 6: CLI Interface *(Completed)*
 - **Objective:** Provide developer and candidate terminal control over the agent state.
-- **Commands:**
-  1. `pilot init`: Initialize database connections, execute migrations, and register/verify the candidate user.
-  2. `pilot ingest --resume <path> [--github <username>]`: Ingest resume and GitHub profile, execute grounded extraction, and populate `evidence_claims`.
-  3. `pilot goal set "<objective>"`: Run the goal compiler and persist the active goal and baseline strategy.
-  4. `pilot show`: Render rich terminal dashboards summarizing candidate evidence claims, active goal specs, back-solved milestones, and current strategies.
+- **Implemented Artifacts:**
+  - `src/pilot/cli/main.py`: Interactive commands built on Typer + Rich:
+    1. `pilot init --email <email> --name <name> [--github <username>]`: Verifies database connectivity, programmatically executes Alembic migrations up to `head`, and idempotently registers or updates the candidate user.
+    2. `pilot ingest --resume <path> [--github <username>] [--force-refresh]`: Ingests resume spans, fetches GitHub repositories/READMEs, runs `GroundedExtractor`, persists claims with hash deduplication, displays grounding pass-rates, and prints dropped claim audits.
+    3. `pilot goal set "<objective>" --deadline <YYYY-MM-DD> [-c key=value]`: Runs `GoalCompiler` with fast-fail checks, renders categorized target specs and numeric criteria, and visualizes back-solved sub-goal milestone schedules.
+    4. `pilot show [--claims] [--goal] [--limit N]`: Inspects active goals, strategy versions, and top verified evidence claims by source with shortened locators.
+  - `src/pilot/cli/__init__.py`: Exports `app`.
+  - `tests/test_cli.py`: 7 tests covering CLI help trees, idempotent user initialization, grounded extraction tables and deduplication idempotency, image-only PDF error handling, past deadline rejection, and empty database hints.
 
 ---
 
-### Step 7: Final Phase 1 Test Suite *(Remaining)*
+### Step 7: Final Phase 1 Test Suite *(Next Up)*
 - **Objective:** Verify end-to-end reliability, grounding guarantees, and timeline logic.
 - **Test Scenarios:**
   1. **Grounding Rule Verification**: Provide LLM outputs with synthetic hallucinated claims; assert that extractor drops 100% of claims lacking exact `source_excerpt` spans.

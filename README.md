@@ -24,7 +24,7 @@ The core objective of Pilot is **auditable decision-making and learning from pre
 - [x] **3. Resume Reader + GitHub Client**: Deterministic raw text and document extraction without LLM.
 - [x] **4. Grounded Extractor + Deduplication**: Structured LLM extraction with validation, content-hash deduplication, and strict provenance enforcement.
 - [x] **5. Goal Compiler**: Objective & constraints parser into target specs, numeric success criteria, and back-solved sub-goal timelines.
-- [ ] **6. CLI**: `pilot init`, `pilot ingest`, `pilot goal set`, `pilot show`.
+- [x] **6. CLI**: `pilot init`, `pilot ingest`, `pilot goal set`, `pilot show`.
 - [ ] **7. Tests**: Test suite for grounding validation, claim deduplication, and goal compiler timeline resolution.
 
 ---
@@ -51,4 +51,34 @@ docker compose up -d
 ### 3. Install Package in Editable Mode
 ```bash
 pip install -e ".[dev]"
+```
+
+---
+
+## CLI Usage
+
+### 1. Initialize Database & Candidate
+Connects to PostgreSQL, runs Alembic migrations up to `head`, and upserts candidate user:
+```bash
+pilot init --email candidate@example.com --name "Candidate Name" --github username
+```
+
+### 2. Ingest Evidence (Resume & GitHub)
+Parses resume, fetches public GitHub code/repositories, and runs grounded structured claim extraction:
+```bash
+pilot ingest --resume path/to/resume.pdf --github username
+```
+
+### 3. Set Career Goal & Back-Solve Funnel
+Decomposes objective into target specs, numeric criteria, and back-solved phased milestones:
+```bash
+pilot goal set "Land an Applied AI Engineer role, remote or Bangalore" --deadline 2026-12-01 -c max_applications_per_day=5
+```
+
+### 4. Inspect World Model & Progress
+Renders active goal specifications, back-solved milestones, and verified evidence claims:
+```bash
+pilot show
+pilot show --goal
+pilot show --claims --limit 15
 ```
