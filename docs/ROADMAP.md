@@ -262,3 +262,53 @@ Phase 1 establishes the rock-solid substrate upon which Phase 2 (Job Intelligenc
 3. **Auditable Fit Scoring & Pure Function Invariant**:
    Fit score is computed deterministically in Python from structured sub-signals rather than an opaque LLM number. A role with an ungrounded must-have requirement (blocking gap) is mathematically prohibited from returning `apply_now`.
 
+
+## 7. Phase 3: Planner (In Progress)
+
+**Objective:** Implement the closed decision loop that is the core research contribution of Pilot — the loop that autonomously prioritizes and takes career actions grounded in evidence and auditable predictions.
+
+### Loop
+$$\text{Observe} \longrightarrow \text{Diagnose} \longrightarrow \text{Generate} \longrightarrow \text{Score} \longrightarrow \text{Select} \longrightarrow \text{Predict} \longrightarrow \text{Execute} \longrightarrow \text{Commit}$$
+
+### Phase 3 Progress Dashboard
+
+| # | Step Name | Scope & Key Deliverables | Status |
+| :-: | :--- | :--- | :-: |
+| **3.1** | **Migration 0003 & Cycle Model** | `cycles` table with unique constraint `uq_cycles_goal_id_cycle_number`; `actions.cycle_id` FK column | **COMPLETED** |
+| **3.2** | **Observe & Deterministic Diagnosis** | Pure `observe()` DB read; deterministic bottom-up funnel pace classification; LLM root-cause hypotheses with numeric validation | **COMPLETED** |
+| **3.3** | **Action Generation, Scoring, Prediction & Execution** | `generate_actions()`, `score_actions()`, `select_actions()`, `record_prediction()`, `execute()`; structural pre-execution invariants | **COMPLETED** |
+| **3.4** | **Cycle Orchestration & Replay Harness** | `run_cycle()` atomic orchestration; `replay_cycle()` counterfactual replay; `pilot cycle run/list/show`, `pilot outcome`, `pilot replay` CLI | **COMPLETED** |
+
+### Architectural Decisions
+
+1. **Diagnosis is Pure Python First, LLM Second:**
+   - Funnel stage classification is 100% deterministic Python walking the funnel bottom-up.
+   - LLM provides root-cause hypotheses for the starved stage only; hypotheses without exact numeric support from the observation are discarded.
+   - Minimum sample floor: if sample count < floor, returns `on_pace` with `insufficient_data: True`.
+   - Build-spec invariant: 32 roles / 8 applications / 0 responses yields `sourcing HEALTHY, applications HEALTHY, responses STARVED`.
+
+2. **Pre-Execution Prediction Invariant:**
+   - Every action MUST have `predicted_outcome` and `predicted_probability` persisted **before** `execute()` is called.
+   - Structural assertion in `execute()` raises `AssertionError` if either field is missing.
+   - Enables Brier score computation when outcomes are recorded via `pilot outcome`.
+
+3. **Single Action Type (Phase 3 Scope Lock):**
+   - Only `generate_application_package` actions exist in Phase 3.
+   - Output is a grounded draft (summary + bullets) strictly from `supporting_claim_ids`.
+   - Escalated for human review via `Escalation` row; no network sends.
+
+4. **Replay Harness Resolution:**
+   - `replay_cycle()` reconstructs observation and re-evaluates selection under alternate policy.
+   - Pure read: never writes DB state.
+   - Counterfactual diff available as `added_action_ids` and `removed_action_ids`.
+
+### Phase 3 Core System Guarantees
+
+1. **Atomic Cycle Invariant:**
+   $$\forall a \in \text{actions}, \quad a.\text{created\_at} \leq a.\text{executed\_at} \land a.\text{predicted\_probability} \neq \text{NULL before executed\_at}$$
+2. **Zero Orphan Actions on Failure:**
+   If a cycle fails mid-execution, the entire transaction is rolled back leaving zero orphan action rows.
+3. **Counterfactual Replay Invariant:**
+   $$\text{replay}(\text{cycle}, \text{policy}') \text{ produces no DB writes and a deterministic diff against original selection}$$
+
+

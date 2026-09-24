@@ -1,5 +1,6 @@
 """Command Line Interface (CLI) for Pilot autonomous career agent."""
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -16,6 +17,8 @@ from sqlalchemy.orm import Session
 
 from pilot.config import get_settings
 from pilot.db.models import (
+    Action,
+    Cycle,
     EvidenceClaim,
     Goal,
     GoalStatus,
@@ -56,7 +59,9 @@ from pilot.sourcing.config import load_boards_config
 
 app = typer.Typer(no_args_is_help=True, help="Pilot: Goal-directed autonomous career agent CLI.")
 goal_app = typer.Typer(no_args_is_help=True, help="Manage candidate goals and strategy versions.")
+cycle_app = typer.Typer(no_args_is_help=True, help="Run and inspect decision cycles.")
 app.add_typer(goal_app, name="goal")
+app.add_typer(cycle_app, name="cycle")
 
 console = Console()
 
@@ -909,3 +914,325 @@ def explain(
             console.print(
                 "[yellow]No grounded candidate claims support this role (score capped).[/yellow]"
             )
+
+
+# ============================================================================
+# Cycle Commands
+# ============================================================================
+
+
+def _resolve_active_goal(session: Session) -> Goal:
+    """Resolve the active goal for the current user."""
+    goal = session.scalars(
+        select(Goal).where(Goal.status == GoalStatus.ACTIVE).order_by(Goal.created_at.desc())
+    ).first()
+    if not goal:
+        raise CLIUserError("No active goal found. Please set a goal first with 'pilot goal set'.")
+    return goal
+
+
+@cycle_app.command("run")
+def cycle_run(
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", "-d", help="Evaluate pipeline without committing actions")
+    ] = False,
+) -> None:
+    """Run a Pilot decision cycle: observe → diagnose → generate → score → select → execute."""
+    from pilot.planner.cycle import run_cycle
+
+    now = datetime.now(UTC)
+    with get_db_session() as session:
+        try:
+            goal = _resolve_active_goal(session)
+        except CLIUserError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1) from None
+
+        console.print(
+            Panel(
+                "[bold cyan]Running Decision Cycle[/bold cyan]"
+                + (" [yellow](DRY RUN)[/yellow]" if dry_run else ""),
+                expand=False,
+            )
+        )
+
+        try:
+            result = run_cycle(session, goal, now=now, dry_run=dry_run)
+        except Exception as exc:
+            console.print(f"[red]Cycle failed: {exc}[/red]")
+            raise typer.Exit(1) from None
+
+        diag = result.diagnosis
+        console.print(
+            f"\n[bold]Cycle #{result.cycle_number}[/bold] "
+            f"| Diagnosis: [yellow]{diag.category.value}[/yellow]"
+            + (f" (starved: {diag.starved_stage})" if diag.starved_stage else "")
+        )
+
+        t = Table(title="Funnel Observation")
+        t.add_column("Stage")
+        t.add_column("Count", justify="right")
+        obs = result.observation
+        t.add_row("Roles Sourced", str(obs.funnel_counts.roles_sourced))
+        t.add_row("Roles Assessed", str(obs.funnel_counts.roles_assessed))
+        t.add_row("Applications", str(obs.funnel_counts.applications))
+        t.add_row("Responses", str(obs.funnel_counts.responses))
+        t.add_row("Interviews", str(obs.funnel_counts.interviews))
+        t.add_row("Offers", str(obs.funnel_counts.offers))
+        console.print(t)
+
+        console.print(
+            f"\nProposed: [bold]{result.actions_proposed}[/bold] actions | "
+            f"Selected: [bold]{result.actions_selected}[/bold] actions"
+        )
+
+        if result.execution_results:
+            et = Table(title="Executed Actions")
+            et.add_column("Role")
+            et.add_column("Company")
+            et.add_column("Escalation ID")
+            for er in result.execution_results:
+                dp = er.draft_package
+                et.add_row(dp.role_title, dp.company_name, str(er.escalation_id)[:8])
+            console.print(et)
+        elif dry_run and result.selected_actions:
+            et = Table(title="Would Execute (Dry Run)")
+            et.add_column("Role")
+            et.add_column("Company")
+            et.add_column("Fit")
+            et.add_column("Score")
+            for sa in result.selected_actions:
+                et.add_row(
+                    sa.candidate.role_title,
+                    sa.candidate.company_name,
+                    f"{sa.candidate.fit_score:.2f}",
+                    f"{sa.score:.3f}",
+                )
+            console.print(et)
+        else:
+            console.print("[yellow]No actions selected this cycle.[/yellow]")
+
+        if not dry_run and result.cycle_id:
+            console.print(
+                f"\n[green]✓ Cycle #{result.cycle_number} committed. ID: {result.cycle_id}[/green]"
+            )
+
+
+@cycle_app.command("list")
+def cycle_list(
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max cycles to show")] = 10,
+) -> None:
+    """List past decision cycles for the active goal."""
+    with get_db_session() as session:
+        try:
+            goal = _resolve_active_goal(session)
+        except CLIUserError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1) from None
+
+        cycles = session.scalars(
+            select(Cycle)
+            .where(Cycle.goal_id == goal.id)
+            .order_by(Cycle.cycle_number.desc())
+            .limit(limit)
+        ).all()
+
+        if not cycles:
+            console.print("[yellow]No cycles found. Run 'pilot cycle run' to start.[/yellow]")
+            return
+
+        t = Table(title=f"Cycles for Goal: {goal.objective_text[:60]}")
+        t.add_column("#", justify="right")
+        t.add_column("Started")
+        t.add_column("Diagnosis")
+        t.add_column("Proposed", justify="right")
+        t.add_column("Selected", justify="right")
+
+        for c in cycles:
+            diag_data = c.diagnosis or {}
+            category = diag_data.get("category", "—")
+            starved = diag_data.get("starved_stage")
+            diag_str = f"{category}" + (f" ({starved})" if starved else "")
+            t.add_row(
+                str(c.cycle_number),
+                c.started_at.strftime("%Y-%m-%d %H:%M") if c.started_at else "—",
+                diag_str,
+                str(c.actions_proposed),
+                str(c.actions_selected),
+            )
+        console.print(t)
+
+
+@cycle_app.command("show")
+def cycle_show(
+    cycle_number: Annotated[int, typer.Argument(help="Cycle number to inspect")],
+) -> None:
+    """Show detailed observation, diagnosis, and actions for a specific cycle."""
+    with get_db_session() as session:
+        try:
+            goal = _resolve_active_goal(session)
+        except CLIUserError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1) from None
+
+        cycle = session.scalars(
+            select(Cycle).where(Cycle.goal_id == goal.id, Cycle.cycle_number == cycle_number)
+        ).first()
+
+        if not cycle:
+            console.print(f"[red]Cycle #{cycle_number} not found.[/red]")
+            raise typer.Exit(1) from None
+
+        obs = cycle.observation or {}
+        diag = cycle.diagnosis or {}
+        funnel = obs.get("funnel_counts", {})
+
+        console.print(
+            Panel(
+                f"[bold cyan]Cycle #{cycle.cycle_number}[/bold cyan]  "
+                f"Started: {cycle.started_at}",
+                expand=False,
+            )
+        )
+
+        ot = Table(title="Funnel Observation")
+        ot.add_column("Stage")
+        ot.add_column("Count", justify="right")
+        for stage, val in funnel.items():
+            ot.add_row(stage, str(val))
+        console.print(ot)
+
+        console.print(
+            f"\nDiagnosis: [yellow]{diag.get('category', '—')}[/yellow]"
+            + (f" (starved: {diag.get('starved_stage')})" if diag.get("starved_stage") else "")
+        )
+        for h in diag.get("hypotheses", []):
+            console.print(
+                f"  • [{h.get('cause')}] {h.get('explanation')} "
+                f"(metric: {h.get('supporting_metric_name')} = {h.get('supporting_metric_value')})"
+            )
+
+        actions = session.scalars(select(Action).where(Action.cycle_id == cycle.id)).all()
+
+        if actions:
+            at = Table(title="Actions Executed")
+            at.add_column("ID")
+            at.add_column("Target")
+            at.add_column("Pred. Prob.")
+            at.add_column("Executed At")
+            for a in actions:
+                at.add_row(
+                    str(a.id)[:8],
+                    str(a.target_id)[:8],
+                    f"{a.predicted_probability:.2f}" if a.predicted_probability else "—",
+                    str(a.executed_at)[:19] if a.executed_at else "—",
+                )
+            console.print(at)
+        else:
+            console.print("[yellow]No actions in this cycle.[/yellow]")
+
+
+@app.command("outcome")
+def outcome_record(
+    action_id: Annotated[str, typer.Argument(help="Action UUID to record outcome for")],
+    success: Annotated[bool, typer.Option("--success/--fail", help="Outcome result")] = True,
+    details: Annotated[
+        str | None, typer.Option("--details", help="Optional outcome details (JSON string)")
+    ] = None,
+    diagnosis_note: Annotated[
+        str | None, typer.Option("--diagnosis", help="Retrospective diagnosis note")
+    ] = None,
+) -> None:
+    """Record the actual outcome of an executed action and compute Brier score."""
+
+    with get_db_session() as session:
+        try:
+            action_uuid = UUID(action_id)
+        except ValueError:
+            console.print(f"[red]Invalid UUID: {action_id}[/red]")
+            raise typer.Exit(1) from None
+
+        action = session.get(Action, action_uuid)
+        if not action:
+            console.print(f"[red]Action {action_id} not found.[/red]")
+            raise typer.Exit(1) from None
+
+        if action.predicted_probability is None:
+            console.print(
+                f"[red]Action {action_id} has no predicted_probability. Cannot compute Brier score.[/red]"
+            )
+            raise typer.Exit(1) from None
+
+        p = float(action.predicted_probability)
+        o = 1.0 if success else 0.0
+        brier = (p - o) ** 2
+
+        details_dict = None
+        if details:
+            try:
+                details_dict = json.loads(details)
+            except (json.JSONDecodeError, ValueError):
+                details_dict = {"raw": details}
+
+        from pilot.db.models import ActionOutcome
+
+        outcome = ActionOutcome(
+            action_id=action.id,
+            binary_success=success,
+            actual_outcome_details=details_dict,
+            brier_score=brier,
+            diagnosis=diagnosis_note,
+            recorded_at=datetime.now(UTC),
+        )
+        session.add(outcome)
+        session.commit()
+
+        console.print(
+            f"[green]✓ Outcome recorded for Action {action_id[:8]}...[/green]\n"
+            f"  Success: {'✓' if success else '✗'}  |  "
+            f"Predicted: {p:.2f}  |  Brier Score: {brier:.4f}"
+        )
+
+
+@app.command("replay")
+def replay(
+    cycle_number: Annotated[int, typer.Argument(help="Cycle number to replay counterfactually")],
+    min_fit: Annotated[
+        float | None, typer.Option("--min-fit", help="Minimum fit score filter")
+    ] = None,
+    max_actions: Annotated[
+        int | None, typer.Option("--max-actions", help="Cap on actions to select")
+    ] = None,
+) -> None:
+    """Replay a past cycle counterfactually under an alternate selection policy."""
+    from pilot.planner.replay import replay_cycle
+
+    with get_db_session() as session:
+        try:
+            goal = _resolve_active_goal(session)
+        except CLIUserError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1) from None
+
+        cycle = session.scalars(
+            select(Cycle).where(Cycle.goal_id == goal.id, Cycle.cycle_number == cycle_number)
+        ).first()
+        if not cycle:
+            console.print(f"[red]Cycle #{cycle_number} not found.[/red]")
+            raise typer.Exit(1) from None
+
+        result = replay_cycle(session, cycle.id, min_fit=min_fit, max_actions=max_actions)
+
+        console.print(Panel(f"[bold cyan]Replay: Cycle #{cycle_number}[/bold cyan]", expand=False))
+        console.print(result.rationale_diff)
+
+        rt = Table(title="Selection Diff")
+        rt.add_column("Action ID")
+        rt.add_column("Change")
+        for aid in result.added_action_ids:
+            rt.add_row(str(aid)[:8], "[green]+added[/green]")
+        for aid in result.removed_action_ids:
+            rt.add_row(str(aid)[:8], "[red]-removed[/red]")
+        if not result.added_action_ids and not result.removed_action_ids:
+            rt.add_row("—", "[dim]No change from original selection[/dim]")
+        console.print(rt)
