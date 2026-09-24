@@ -1,6 +1,7 @@
 """Execution engine for Pilot Planner actions."""
 
 import json
+import uuid
 from datetime import datetime
 
 from sqlalchemy import select
@@ -83,8 +84,6 @@ def execute(
 
     claims: list[EvidenceClaim] = []
     if claim_ids_str and user_id:
-        import uuid
-
         claim_uuids = []
         for cid in claim_ids_str:
             try:
@@ -136,7 +135,9 @@ def execute(
     action.outcome_at = now
 
     # 6. Human Review Surface via Escalation
+    escalation_id = uuid.uuid4()
     escalation = Escalation(
+        id=escalation_id,
         goal_id=action.goal_id,
         action_id=action.id,
         reason=f"Review draft application package for '{role.title}' at {company_name}",
@@ -150,5 +151,5 @@ def execute(
         action_id=action.id,
         executed_at=now,
         draft_package=draft_package,
-        escalation_id=escalation.id,
+        escalation_id=escalation_id,
     )
