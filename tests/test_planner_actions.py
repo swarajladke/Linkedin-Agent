@@ -202,10 +202,14 @@ def test_execute_creates_grounded_draft_and_escalation():
     )
     claim = EvidenceClaim(
         id=claim_id,
+        entity_type="user",
         entity_id=user_id,
-        claim_statement="Built high-throughput Raft consensus engine in Rust",
+        claim="Built high-throughput Raft consensus engine in Rust",
+        source="github",
         source_excerpt="Built high-throughput Raft consensus engine in Rust scaling to 100k ops/sec",
         source_url="https://github.com/candidate/raft-rs",
+        content_hash="a" * 64,
+        confidence=0.95,
     )
 
     def mock_get(model, pk):

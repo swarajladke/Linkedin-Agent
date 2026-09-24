@@ -108,7 +108,7 @@ def execute(
     for c in claims:
         # Grounded bullet strictly using verbatim source excerpt or verified statement
         bullets.append(
-            f"• Demonstrates capability in: {c.claim_statement} "
+            f"• Demonstrates capability in: {c.claim} "
             f'[Source: {c.source_url} (excerpt: "{c.source_excerpt[:80]}...")]'
         )
 
