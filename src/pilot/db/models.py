@@ -22,6 +22,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -30,16 +31,16 @@ from pilot.db.session import Base
 
 
 # ============================================================================
-# Enums
+# Enums (Python 3.11+ StrEnum)
 # ============================================================================
-class GoalStatus(str, enum.Enum):
+class GoalStatus(enum.StrEnum):
     ACTIVE = "active"
     PAUSED = "paused"
     ACHIEVED = "achieved"
     ABANDONED = "abandoned"
 
 
-class ApplicationStage(str, enum.Enum):
+class ApplicationStage(enum.StrEnum):
     DISCOVERED = "discovered"
     PREPARING = "preparing"
     APPLIED = "applied"
@@ -51,13 +52,13 @@ class ApplicationStage(str, enum.Enum):
     WITHDRAWN = "withdrawn"
 
 
-class RoleStatus(str, enum.Enum):
+class RoleStatus(enum.StrEnum):
     OPEN = "open"
     APPLIED = "applied"
     CLOSED = "closed"
 
 
-class StrategyNoteStatus(str, enum.Enum):
+class StrategyNoteStatus(enum.StrEnum):
     ACTIVE = "active"
     REFUTED = "refuted"
     GRADUATED = "graduated"
@@ -435,7 +436,6 @@ class Action(Base):
         nullable=False,
         server_default=text("0.0"),
     )
-    strategy_version: Mapped[str] = mapped_column(String(50), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -455,6 +455,9 @@ class Action(Base):
         cascade="all, delete-orphan",
     )
     escalations: Mapped[list["Escalation"]] = relationship("Escalation", back_populates="action")
+
+    # Read-only association proxy to human-readable strategy version (single source of truth)
+    strategy_version: AssociationProxy[int | None] = association_proxy("strategy", "version")
 
 
 class ActionOutcome(Base):

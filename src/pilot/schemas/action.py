@@ -25,7 +25,6 @@ class ActionBase(BaseModel):
     predicted_outcome: str = Field(min_length=5, description="Falsifiable prediction statement")
     predicted_probability: float = Field(ge=0.0, le=1.0)
     cost: Decimal = Field(default=Decimal("0.0"), ge=Decimal("0.0"))
-    strategy_version: str = Field(min_length=1, max_length=50)
     executed_at: datetime | None = None
     actual_outcome: str | None = None
     outcome_at: datetime | None = None
@@ -37,6 +36,10 @@ class ActionCreate(ActionBase):
 
 class ActionRead(ActionBase):
     id: UUID
+    strategy_version: int | None = Field(
+        default=None,
+        description="Derived dynamically from parent strategy version",
+    )
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

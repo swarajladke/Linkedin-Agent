@@ -2,6 +2,7 @@
 
 import uuid
 
+import pgvector.sqlalchemy
 import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
@@ -22,6 +23,16 @@ def get_alembic_config() -> Config:
     return alembic_cfg
 
 
+def custom_compare_type(context, inspected_column, metadata_column, inspected_type, metadata_type):
+    """Custom compare_type avoiding false positive diffs on pgvector columns."""
+    if isinstance(metadata_type, pgvector.sqlalchemy.Vector):
+        if isinstance(inspected_type, pgvector.sqlalchemy.Vector):
+            return metadata_type.dim != inspected_type.dim
+        if getattr(inspected_type, "name", "").lower() == "vector":
+            return False
+    return None
+
+
 def test_full_migration_lifecycle_and_constraints(db_engine):
     """Test upgrade -> zero-diff autogenerate -> constraints -> triggers -> downgrade."""
     alembic_cfg = get_alembic_config()
@@ -30,8 +41,14 @@ def test_full_migration_lifecycle_and_constraints(db_engine):
     command.upgrade(alembic_cfg, "head")
 
     with db_engine.connect() as connection:
+        # Register pgvector dialect type mapping
+        connection.dialect.ischema_names["vector"] = pgvector.sqlalchemy.Vector
+
         # 2. Assert zero schema diff between Base.metadata and live DB
-        migration_context = MigrationContext.configure(connection)
+        migration_context = MigrationContext.configure(
+            connection,
+            opts={"compare_type": custom_compare_type, "compare_server_default": True},
+        )
         diff = compare_metadata(migration_context, Base.metadata)
         assert diff == [], f"Autogenerate diff is not empty: {diff}"
 
@@ -77,10 +94,10 @@ def test_full_migration_lifecycle_and_constraints(db_engine):
                     """
                     INSERT INTO actions (
                         id, goal_id, strategy_id, action_type, target_type,
-                        reason, predicted_outcome, predicted_probability, strategy_version
+                        reason, predicted_outcome, predicted_probability
                     ) VALUES (
                         gen_random_uuid(), :goal_id, :strategy_id, 'test_action', 'role',
-                        'test reason', 'test predicted outcome', 1.5, 'v1'
+                        'test reason', 'test predicted outcome', 1.5
                     )
                     """
                 ),
@@ -154,16 +171,16 @@ def test_full_migration_lifecycle_and_constraints(db_engine):
             ),
             {"strategy_id": strategy_id, "goal_id": goal_id},
         )
-        # Action with predicted_probability = 0.8
+        # Action with predicted_probability = 0.8 (no strategy_version column)
         connection.execute(
             text(
                 """
                 INSERT INTO actions (
                     id, goal_id, strategy_id, action_type, target_type,
-                    reason, predicted_outcome, predicted_probability, strategy_version
+                    reason, predicted_outcome, predicted_probability
                 ) VALUES (
                     :action_id, :goal_id, :strategy_id, 'reach_out', 'person',
-                    'High response rate expected', 'Recruiter replies', 0.8, 'v1'
+                    'High response rate expected', 'Recruiter replies', 0.8
                 )
                 """
             ),
@@ -171,7 +188,6 @@ def test_full_migration_lifecycle_and_constraints(db_engine):
         )
 
         # Insert outcome with binary_success = False (0.0). Expected Brier: (0.8 - 0.0)^2 = 0.64
-        # We pass dummy brier_score 0.0, trigger MUST overwrite it with (0.8 - 0.0)^2 = 0.64
         connection.execute(
             text(
                 """

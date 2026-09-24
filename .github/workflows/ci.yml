@@ -45,6 +45,14 @@ jobs:
       - name: Run Ruff Format Check
         run: ruff format --check .
 
+      - name: Run Alembic Upgrade & Autogenerate Check
+        env:
+          DATABASE_URL: postgresql+psycopg://pilot:pilot_password@localhost:5432/pilot
+          PILOT_ENV: test
+        run: |
+          alembic upgrade head
+          alembic check
+
       - name: Run Test Suite (Alembic & Constraints)
         env:
           DATABASE_URL: postgresql+psycopg://pilot:pilot_password@localhost:5432/pilot

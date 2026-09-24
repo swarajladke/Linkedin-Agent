@@ -2,6 +2,7 @@
 
 from logging.config import fileConfig
 
+import pgvector.sqlalchemy
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
@@ -27,6 +28,22 @@ settings = get_settings()
 config.set_main_option("sqlalchemy.url", settings.database_url.get_secret_value())
 
 
+def compare_type(
+    context,
+    inspected_column,
+    metadata_column,
+    inspected_type,
+    metadata_type,
+):
+    """Custom compare_type to avoid spurious diffs on pgvector Vector columns."""
+    if isinstance(metadata_type, pgvector.sqlalchemy.Vector):
+        if isinstance(inspected_type, pgvector.sqlalchemy.Vector):
+            return metadata_type.dim != inspected_type.dim
+        if getattr(inspected_type, "name", "").lower() == "vector":
+            return False
+    return None
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -44,7 +61,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        compare_type=True,
+        compare_type=compare_type,
         compare_server_default=True,
     )
 
@@ -65,10 +82,13 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        # Register pgvector in dialect ischema_names so Alembic recognizes the type
+        connection.dialect.ischema_names["vector"] = pgvector.sqlalchemy.Vector
+
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            compare_type=True,
+            compare_type=compare_type,
             compare_server_default=True,
         )
 

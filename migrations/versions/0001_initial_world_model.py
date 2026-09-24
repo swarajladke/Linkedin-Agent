@@ -379,7 +379,6 @@ def upgrade() -> None:
         sa.Column("predicted_outcome", sa.Text(), nullable=False),
         sa.Column("predicted_probability", sa.Float(), nullable=False),
         sa.Column("cost", sa.Numeric(precision=10, scale=4), server_default="0.0", nullable=False),
-        sa.Column("strategy_version", sa.String(length=50), nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
