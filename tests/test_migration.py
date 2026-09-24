@@ -282,22 +282,7 @@ def test_full_migration_lifecycle_and_constraints(db_engine):
             {"role_id": role_id, "company_id": company_id},
         )
 
-        # Test CheckConstraint: fit_score > 1.0 must fail
-        with pytest.raises(IntegrityError):
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO role_assessments (
-                        id, role_id, goal_id, fit_score, fit_rationale, recommended_action, assessor_version
-                    ) VALUES (
-                        gen_random_uuid(), :role_id, :goal_id, 1.2, 'Too high', 'apply_now', 'v1'
-                    )
-                    """
-                ),
-                {"role_id": role_id, "goal_id": goal_id},
-            )
-
-        # Valid insertion
+        # 1. Valid insertion first
         connection.execute(
             text(
                 """
@@ -311,20 +296,37 @@ def test_full_migration_lifecycle_and_constraints(db_engine):
             {"role_id": role_id, "goal_id": goal_id},
         )
 
-        # Test UniqueConstraint: duplicate (role_id, goal_id, assessor_version) must fail
+        # 2. Test CheckConstraint: fit_score > 1.0 must fail
         with pytest.raises(IntegrityError):
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO role_assessments (
-                        id, role_id, goal_id, fit_score, fit_rationale, recommended_action, assessor_version
-                    ) VALUES (
-                        gen_random_uuid(), :role_id, :goal_id, 0.90, 'Duplicate', 'apply_now', 'v1'
-                    )
-                    """
-                ),
-                {"role_id": role_id, "goal_id": goal_id},
-            )
+            with connection.begin_nested():
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO role_assessments (
+                            id, role_id, goal_id, fit_score, fit_rationale, recommended_action, assessor_version
+                        ) VALUES (
+                            gen_random_uuid(), :role_id, :goal_id, 1.2, 'Too high', 'apply_now', 'v2'
+                        )
+                        """
+                    ),
+                    {"role_id": role_id, "goal_id": goal_id},
+                )
+
+        # 3. Test UniqueConstraint: duplicate (role_id, goal_id, assessor_version) must fail
+        with pytest.raises(IntegrityError):
+            with connection.begin_nested():
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO role_assessments (
+                            id, role_id, goal_id, fit_score, fit_rationale, recommended_action, assessor_version
+                        ) VALUES (
+                            gen_random_uuid(), :role_id, :goal_id, 0.90, 'Duplicate', 'apply_now', 'v1'
+                        )
+                        """
+                    ),
+                    {"role_id": role_id, "goal_id": goal_id},
+                )
         trans.rollback()
 
     # 8. Test downgrade to base and restore to head for subsequent tests
