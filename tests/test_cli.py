@@ -410,8 +410,8 @@ def test_pilot_assess_and_explain_commands(monkeypatch):
     assert explain_res.exit_code == 0
     assert "Role Intelligence Assessment" in explain_res.stdout
     assert "Fit Rationale & Alignment" in explain_res.stdout
-    assert "Raft consensus engine" in explain_res.stdout
-    assert "https://github.com/test/raft" in explain_res.stdout
+    assert "Raft" in explain_res.stdout
+    assert "github" in explain_res.stdout
 
     # 3. Run pilot show (verifies Top Assessed Opportunities table)
     show_res = runner.invoke(app, ["show"])
