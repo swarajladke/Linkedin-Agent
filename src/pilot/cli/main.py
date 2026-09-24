@@ -15,7 +15,16 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from pilot.config import get_settings
-from pilot.db.models import EvidenceClaim, Goal, GoalStatus, Strategy, User
+from pilot.db.models import (
+    EvidenceClaim,
+    Goal,
+    GoalStatus,
+    Role,
+    RoleAssessment,
+    RoleStatus,
+    Strategy,
+    User,
+)
 from pilot.db.session import get_db_session, get_engine
 from pilot.extraction import (
     GroundedExtractor,
@@ -35,6 +44,7 @@ from pilot.ingestion import (
     ResumeReaderError,
     UnsupportedFileFormatError,
 )
+from pilot.intelligence import RoleAssessor, upsert_assessments
 from pilot.sourcing import (
     AshbySource,
     GreenhouseSource,
@@ -645,3 +655,257 @@ def show(
                         locator,
                     )
                 console.print(claims_table)
+
+        # Top Opportunities Table
+        if active_goal:
+            top_assessments = session.scalars(
+                select(RoleAssessment)
+                .where(RoleAssessment.goal_id == active_goal.id)
+                .order_by(RoleAssessment.fit_score.desc())
+                .limit(limit)
+            ).all()
+
+            if top_assessments:
+                opp_table = Table(
+                    title=f"Top Assessed Opportunities (Goal: {active_goal.objective_text})",
+                    show_lines=True,
+                )
+                opp_table.add_column("Role ID", style="dim", width=8)
+                opp_table.add_column("Role Title", style="bold white")
+                opp_table.add_column("Company", style="cyan")
+                opp_table.add_column("Fit Score", justify="right", style="bold green")
+                opp_table.add_column("Recommended Action", style="yellow")
+                opp_table.add_column("Blocking Gaps", style="red")
+
+                for a in top_assessments:
+                    r = a.role
+                    comp_name = r.company.name if r and r.company else "Unknown"
+                    blocking_count = (
+                        sum(1 for g in a.skill_gaps if isinstance(g, dict) and g.get("blocking"))
+                        if a.skill_gaps
+                        else 0
+                    )
+                    opp_table.add_row(
+                        str(a.role_id)[:8],
+                        r.title if r else "Unknown",
+                        comp_name,
+                        f"{a.fit_score:.2f}",
+                        a.recommended_action,
+                        f"{blocking_count} blocking" if blocking_count > 0 else "None",
+                    )
+                console.print(opp_table)
+
+
+@app.command()
+def assess(
+    limit: Annotated[
+        int, typer.Option("--limit", "-l", help="Maximum unassessed roles to evaluate")
+    ] = 20,
+    min_fit: Annotated[
+        float, typer.Option("--min-fit", help="Minimum fit score threshold to display")
+    ] = 0.0,
+    version: Annotated[str, typer.Option("--version", "-v", help="Assessor policy version")] = "v1",
+) -> None:
+    """Assess unassessed open roles against active career goal using grounded candidate evidence claims."""
+    with get_db_session() as session:
+        try:
+            user = resolve_active_user(session)
+        except CLIUserError as err:
+            console.print(f"[red]{err}[/red]")
+            raise typer.Exit(1) from None
+
+        active_goal = session.scalars(
+            select(Goal).where(Goal.user_id == user.id, Goal.status == GoalStatus.ACTIVE)
+        ).first()
+
+        if not active_goal:
+            console.print(
+                '[yellow]No active goal found. Run: pilot goal set "<objective>" --deadline <YYYY-MM-DD>[/yellow]'
+            )
+            raise typer.Exit(1)
+
+        # Load candidate evidence claims
+        claims = list(
+            session.scalars(select(EvidenceClaim).where(EvidenceClaim.entity_id == user.id)).all()
+        )
+
+        if not claims:
+            console.print(
+                "[yellow]No evidence claims found for user. Candidate fit scores will be grounded to 0. Run 'pilot ingest' first.[/yellow]"
+            )
+
+        # Find unassessed open roles for this (goal_id, assessor_version)
+        assessed_role_ids = set(
+            session.scalars(
+                select(RoleAssessment.role_id).where(
+                    RoleAssessment.goal_id == active_goal.id,
+                    RoleAssessment.assessor_version == version,
+                )
+            ).all()
+        )
+
+        stmt = select(Role).where(Role.status == RoleStatus.OPEN).order_by(Role.created_at.desc())
+        all_open_roles = session.scalars(stmt).all()
+        unassessed_roles = [r for r in all_open_roles if r.id not in assessed_role_ids][:limit]
+
+        if not unassessed_roles:
+            console.print(
+                f"[green]All open roles already assessed under assessor version '{version}' for active goal.[/green]"
+            )
+            return
+
+        llm_client = OpenAIStructuredClient()
+        assessor = RoleAssessor(llm=llm_client, assessor_version=version)
+
+        assessment_creates = []
+        for role in unassessed_roles:
+            res_create = assessor.assess(role=role, goal=active_goal, claims=claims)
+            if res_create.fit_score >= min_fit:
+                assessment_creates.append(res_create)
+
+        persisted = upsert_assessments(session, assessment_creates)
+        session.commit()
+
+        # Render assessment table
+        table = Table(
+            title=f"Role Assessments (Assessor: {version}, Goal: {active_goal.objective_text[:40]}...)",
+            show_lines=True,
+        )
+        table.add_column("Role ID", style="dim", width=8)
+        table.add_column("Title", style="bold white")
+        table.add_column("Company", style="cyan")
+        table.add_column("Fit Score", justify="right", style="bold green")
+        table.add_column("Blocking Gaps", style="red")
+        table.add_column("Recommended Action", style="yellow")
+
+        for a in persisted:
+            r = a.role
+            comp_name = r.company.name if r and r.company else "Unknown"
+            blocking_count = (
+                sum(1 for g in a.skill_gaps if isinstance(g, dict) and g.get("blocking"))
+                if a.skill_gaps
+                else 0
+            )
+            table.add_row(
+                str(a.role_id)[:8],
+                r.title if r else "Unknown",
+                comp_name,
+                f"{a.fit_score:.2f}",
+                f"{blocking_count} blocking" if blocking_count > 0 else "None",
+                a.recommended_action,
+            )
+
+        console.print(table)
+        console.print(
+            f"[bold green]✓ Assessed {len(persisted)} roles successfully.[/bold green] Use 'pilot explain <role_id>' to inspect evidence citations."
+        )
+
+
+@app.command()
+def explain(
+    role_id: Annotated[str, typer.Argument(help="Role ID (or prefix) to explain")],
+) -> None:
+    """Print role assessment with grounded evidence claim citations and full provenance."""
+    with get_db_session() as session:
+        # Match by prefix or exact UUID
+        role = None
+        try:
+            target_uuid = UUID(role_id)
+            role = session.scalar(select(Role).where(Role.id == target_uuid))
+        except ValueError:
+            stmt = select(Role).where(text("id::text LIKE :prefix")).params(prefix=f"{role_id}%")
+            role = session.scalars(stmt).first()
+
+        if not role:
+            console.print(f"[red]Role not found with ID/prefix: {role_id}[/red]")
+            raise typer.Exit(1)
+
+        # Get latest assessment for this role
+        assessment = session.scalars(
+            select(RoleAssessment)
+            .where(RoleAssessment.role_id == role.id)
+            .order_by(RoleAssessment.assessed_at.desc())
+        ).first()
+
+        if not assessment:
+            console.print(
+                f"[yellow]Role '{role.title}' has not been assessed yet. Run: pilot assess[/yellow]"
+            )
+            raise typer.Exit(1)
+
+        comp_name = role.company.name if role.company else "Unknown"
+
+        # Overview Header
+        header_text = (
+            f"[bold]Role:[/bold] {role.title}\n"
+            f"[bold]Company:[/bold] {comp_name}\n"
+            f"[bold]Location:[/bold] {role.location or 'Unspecified'} ({role.location_type})\n"
+            f"[bold]Posting URL:[/bold] {role.posting_url or 'N/A'}\n"
+            f"[bold]Fit Score:[/bold] [bold green]{assessment.fit_score:.2f}[/bold green] | "
+            f"[bold]Action:[/bold] [bold yellow]{assessment.recommended_action}[/bold yellow] | "
+            f"[bold]Assessor Version:[/bold] {assessment.assessor_version}"
+        )
+        console.print(
+            Panel(header_text, title="[bold cyan]Role Intelligence Assessment[/bold cyan]")
+        )
+
+        # Fit Rationale
+        console.print(
+            Panel(
+                assessment.fit_rationale,
+                title="[bold green]Fit Rationale & Alignment[/bold green]",
+            )
+        )
+
+        # Skill Gaps Table
+        if assessment.skill_gaps:
+            gaps_table = Table(title="Identified Skill & Experience Gaps", show_lines=True)
+            gaps_table.add_column("Gap Description", style="white")
+            gaps_table.add_column("Severity", style="cyan", width=10)
+            gaps_table.add_column("Blocking?", style="bold red", width=12)
+
+            for g in assessment.skill_gaps:
+                gap_desc = g.get("gap", "") if isinstance(g, dict) else getattr(g, "gap", "")
+                sev = g.get("severity", "") if isinstance(g, dict) else getattr(g, "severity", "")
+                blocking = (
+                    g.get("blocking", False)
+                    if isinstance(g, dict)
+                    else getattr(g, "blocking", False)
+                )
+                gaps_table.add_row(
+                    gap_desc,
+                    sev,
+                    "[bold red]YES (Blocking)[/bold red]" if blocking else "[green]No[/green]",
+                )
+            console.print(gaps_table)
+
+        # Supporting Grounded Evidence Claims
+        claim_ids = [UUID(cid) for cid in assessment.supporting_claim_ids]
+        if claim_ids:
+            claims_rows = session.scalars(
+                select(EvidenceClaim).where(EvidenceClaim.id.in_(claim_ids))
+            ).all()
+
+            claims_table = Table(
+                title=f"Grounded Evidence Claims Supporting Fit ({len(claims_rows)} citations)",
+                show_lines=True,
+            )
+            claims_table.add_column("Claim ID", style="dim", width=8)
+            claims_table.add_column("Evidence Claim", style="white")
+            claims_table.add_column("Source", style="cyan", width=8)
+            claims_table.add_column("Source Locator / URL", style="magenta")
+            claims_table.add_column("Verbatim Source Excerpt", style="green")
+
+            for c in claims_rows:
+                claims_table.add_row(
+                    str(c.id)[:8],
+                    c.claim,
+                    c.source,
+                    c.source_url,
+                    f'"{c.source_excerpt}"',
+                )
+            console.print(claims_table)
+        else:
+            console.print(
+                "[yellow]No grounded candidate claims support this role (score capped).[/yellow]"
+            )

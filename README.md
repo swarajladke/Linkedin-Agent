@@ -29,6 +29,18 @@ The core objective of Pilot is **auditable decision-making and learning from pre
 
 ---
 
+## Phase 2 Deliverables: Job Intelligence (Complete)
+
+- [x] **1. Migration 0002 & Schema**: Add sourcing columns to `roles` (`source`, `external_id`, `raw_posting`, timestamps), unique `(source, external_id)`; create `role_assessments` table with check constraint `fit_score ∈ [0, 1]`, unique `(role_id, goal_id, assessor_version)`.
+- [x] **2. Job Board Adapters**: Public, unauthenticated `JobSource` adapters for Greenhouse, Ashby, and Lever with deterministic HTML stripping, disk caching, and rate-limit backoff.
+- [x] **3. Sourcing Repository**: Idempotent `upsert_roles` with company deduplication, `first_seen_at` immutability, `last_seen_at` progression, and absence-based `RoleStatus.CLOSED` transition.
+- [x] **4. Grounded Role Assessor**: Auditable fit scoring pure function from structured sub-signals, strict candidate claim ID validation, blocking gap penalty, and deterministic recommended action derivation.
+- [x] **5. Intelligence Repository**: `upsert_assessments` with versioning semantics (in-place update under same version, new row on version bump for replay).
+- [x] **6. CLI Extensions**: `pilot source`, `pilot assess`, `pilot explain <role_id>`, and top opportunities table in `pilot show`.
+- [x] **7. Invariant Tests**: Pure function score, fabricated claim rejection, blocking gap constraints, 3-run sourcing idempotency, closed role transition, versioning replay, and aggregate claim grounding invariant.
+
+---
+
 ## Quickstart
 
 ### Prerequisites
@@ -76,9 +88,29 @@ pilot goal set "Land an Applied AI Engineer role, remote or Bangalore" --deadlin
 ```
 
 ### 4. Inspect World Model & Progress
-Renders active goal specifications, back-solved milestones, and verified evidence claims:
+Renders active goal specifications, back-solved milestones, verified evidence claims, and top opportunities:
 ```bash
 pilot show
 pilot show --goal
 pilot show --claims --limit 15
 ```
+
+### 5. Source Job Postings (Permitted Job Boards)
+Fetches job postings from configured boards (`config/boards.yaml`), parses HTML content, and idempotently upserts roles:
+```bash
+pilot source --all
+pilot source --board canonical --board ramp
+```
+
+### 6. Assess Open Roles Against Career Goal
+Evaluates unassessed open roles against candidate claims using grounded scoring and blocking gap detection:
+```bash
+pilot assess --limit 20 --min-fit 0.5
+```
+
+### 7. Explain Role Assessment & Grounded Evidence Citations
+Inspects an assessment with full provenance, displaying verbatim text excerpts and locators for every supporting evidence claim:
+```bash
+pilot explain <role_id>
+```
+

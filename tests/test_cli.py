@@ -39,6 +39,8 @@ def test_cli_help_and_subcommand_helps():
         ["init", "--help"],
         ["ingest", "--help"],
         ["source", "--help"],
+        ["assess", "--help"],
+        ["explain", "--help"],
         ["goal", "--help"],
         ["goal", "set", "--help"],
         ["show", "--help"],
@@ -322,3 +324,96 @@ def test_pilot_source_command(monkeypatch):
     assert "Job Sourcing Results" in res.stdout
     assert "Canonical (canonical)" in res.stdout
     assert "Sourcing complete" in res.stdout
+
+
+def test_pilot_assess_and_explain_commands(monkeypatch):
+    """Test pilot assess, explain, and top opportunities in show command."""
+    from pilot.db.models import Company, Role
+    from pilot.intelligence.assessor import LLMRoleSubSignals
+    from pilot.schemas.intelligence import SkillGap
+
+    user_email = f"cli_assess_{uuid.uuid4().hex[:8]}@example.com"
+    init_res = runner.invoke(app, ["init", "--email", user_email, "--name", "Assess Candidate"])
+    assert init_res.exit_code == 0
+
+    with get_db_session() as session:
+        user = session.scalar(select(User).where(User.email == user_email))
+        assert user is not None
+
+        goal = Goal(
+            user_id=user.id,
+            objective_text="Land Distributed Systems Architect role",
+            constraints_json={},
+            target_spec={"must_have": ["Distributed Systems"]},
+            success_criteria={},
+            sub_goals=[],
+            deadline=datetime(2027, 6, 1, tzinfo=UTC),
+            status=GoalStatus.ACTIVE,
+        )
+        session.add(goal)
+
+        claim = EvidenceClaim(
+            entity_type="user",
+            entity_id=user.id,
+            claim="Engineered high-throughput Raft consensus engine",
+            source="github",
+            source_url="https://github.com/test/raft",
+            source_excerpt="Raft consensus engine",
+            content_hash=f"hash_{uuid.uuid4().hex}",
+            confidence=0.95,
+        )
+        session.add(claim)
+
+        company = Company(name="CloudScale Corp", domain="cloudscale.io")
+        session.add(company)
+
+        role = Role(
+            company_id=company.id,
+            title="Principal Distributed Systems Engineer",
+            location_type="remote",
+            location="Remote",
+            source="greenhouse",
+            external_id="cs-101",
+            requirements_summary="Lead Raft consensus and distributed storage engines.",
+        )
+        session.add(role)
+        session.commit()
+        role_id_str = str(role.id)
+        claim_id_str = str(claim.id)
+
+    # Mock StructuredLLMClient completion for assess
+    fake_sub_signals = LLMRoleSubSignals(
+        fit_rationale="Superb match for Raft consensus systems background.",
+        must_have_coverage=1.0,
+        nice_to_have_coverage=0.9,
+        location_compatibility=1.0,
+        supporting_claim_ids=[claim_id_str],
+        skill_gaps=[SkillGap(gap="Rust", severity="low", blocking=False)],
+        company_context={"name": "CloudScale Corp"},
+    )
+
+    monkeypatch.setattr(
+        "pilot.extraction.llm.OpenAIStructuredClient.complete_structured",
+        lambda self, system_prompt, user_prompt, schema: fake_sub_signals,
+    )
+
+    # 1. Run pilot assess
+    assess_res = runner.invoke(app, ["assess"])
+    assert assess_res.exit_code == 0
+    assert "Role Assessments" in assess_res.stdout
+    assert "CloudScale Corp" in assess_res.stdout
+    assert "apply_now" in assess_res.stdout
+
+    # 2. Run pilot explain
+    explain_res = runner.invoke(app, ["explain", role_id_str[:8]])
+    assert explain_res.exit_code == 0
+    assert "Role Intelligence Assessment" in explain_res.stdout
+    assert "Fit Rationale & Alignment" in explain_res.stdout
+    assert "Raft consensus engine" in explain_res.stdout
+    assert "https://github.com/test/raft" in explain_res.stdout
+
+    # 3. Run pilot show (verifies Top Assessed Opportunities table)
+    show_res = runner.invoke(app, ["show"])
+    assert show_res.exit_code == 0
+    assert "Top Assessed Opportunities" in show_res.stdout
+    assert "Principal Distributed Systems Engineer" in show_res.stdout

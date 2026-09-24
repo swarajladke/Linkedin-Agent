@@ -227,3 +227,38 @@ Phase 1 establishes the rock-solid substrate upon which Phase 2 (Job Intelligenc
    Sub-goal deadlines are strictly increasing in dependency order and bounded within $(t_{\text{now}}, t_{\text{goal}})$. Back-solved funnel volumes are monotonic and mathematically self-consistent with conversion priors. Rate-limiting constraints that make funnels mathematically impossible raise `InfeasibleGoalError` prior to persistence.
 3. **Ingest Idempotency & Provenance Refresh Invariant**:
    Re-running ingestion arbitrarily many times yields zero duplicate rows in `evidence_claims`, leaves original `created_at` immutable, and updates `verified_at` to mark active re-verification. Identical claim texts from distinct sources (`resume` vs `github`) preserve distinct provenance URLs and content hashes.
+
+---
+
+## 6. Phase 2: Job Intelligence (Complete)
+
+**Objective:** Source real job postings from permitted APIs and enrich each into a decision-ready record: auditable fit score, the evidence claims supporting that fit, skill gaps, company context, and a recommended action.
+
+### Phase 2 Progress Dashboard
+
+| # | Step Name | Scope & Key Deliverables | Status |
+| :-: | :--- | :--- | :-: |
+| **2.1** | **Migration 0002 & Schema** | Add sourcing metadata to `roles` (`source`, `external_id`, `raw_posting`, timestamps), unique `(source, external_id)`; create `role_assessments` table with CHECK constraint `fit_score ∈ [0, 1]`, unique `(role_id, goal_id, assessor_version)`. | **COMPLETED** |
+| **2.2** | **Permitted Board Adapters** | `JobSource` Protocol with Greenhouse, Ashby, Lever adapters. Unauthenticated public GET APIs only. Deterministic HTML stripping, IngestionCache integration, rate-limit awareness, and 5xx backoff. | **COMPLETED** |
+| **2.3** | **Sourcing Repository** | `upsert_roles` with company deduplication, `first_seen_at` immutability, `last_seen_at` progression, and absence-based `RoleStatus.CLOSED` transition. | **COMPLETED** |
+| **2.4** | **Grounded Role Assessor** | Pure function fit scoring from structured sub-signals (must-have, nice-to-have, location), strict claim ID grounding check (fabricated IDs discarded), blocking gap penalties, deterministic recommended action rules. | **COMPLETED** |
+| **2.5** | **Intelligence Repository** | `upsert_assessments` with versioning semantics (in-place update under same `assessor_version`, new immutable row on version bump for replay). | **COMPLETED** |
+| **2.6** | **CLI Additions** | `pilot source [--board <slug> ...] [--all]`, `pilot assess [--limit N] [--min-fit 0.0]`, `pilot explain <role_id>`, and top opportunities table in `pilot show`. | **COMPLETED** |
+| **2.7** | **Phase 2 Invariant Tests** | Unit tests (pure function score, fabricated claim rejection, blocking gap constraints) and Integration tests (3-run idempotency, role closure, assessment versioning, claim grounding invariant). | **COMPLETED** |
+
+### Open Questions & Architectural Decisions
+
+- **Phase 2 Sourcing Sources Decision:**
+  - **Status:** **Resolved**.
+  - **Decision:** Sourcing is exclusively implemented via **Greenhouse + Ashby + Lever public posting APIs**. No LinkedIn scraping, no Indeed, no authenticated browser sessions, and no HTML scraping of forbidden endpoints. All ATS adapters consume public, unauthenticated JSON/GET feeds with local cache and rate-limit backoff.
+
+### Phase 2 Core System Guarantees
+
+1. **Assessment Claim Grounding Invariant**:
+   $$\forall \text{cid} \in \text{assessment.supporting\_claim\_ids}, \quad \exists c \in \text{evidence\_claims} \text{ where } c.\text{id} = \text{cid} \land c.\text{entity\_id} = \text{user.id}$$
+   Every supporting claim cited in an assessment must resolve to a real, verified evidence claim belonging to the target candidate. Fabricated or hallucinated IDs are discarded, and scores without surviving claims are strictly capped at $\le 0.30$.
+2. **Sourcing Idempotency & Role Life Cycle**:
+   Re-sourcing a board refreshes timestamps (`last_seen_at`) without changing `first_seen_at` or creating duplicate rows. Roles disappearing from a feed transition to `RoleStatus.CLOSED` rather than being deleted, preserving history for the world model.
+3. **Auditable Fit Scoring & Pure Function Invariant**:
+   Fit score is computed deterministically in Python from structured sub-signals rather than an opaque LLM number. A role with an ungrounded must-have requirement (blocking gap) is mathematically prohibited from returning `apply_now`.
+
