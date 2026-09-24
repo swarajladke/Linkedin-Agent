@@ -1,9 +1,8 @@
 """Configuration settings for Pilot loaded from environment variables."""
 
 from functools import lru_cache
-from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,13 +10,13 @@ class Settings(BaseSettings):
     """Application settings for Pilot."""
 
     # Database
-    database_url: str = Field(
-        default="postgresql+psycopg://pilot:pilot_password@localhost:5432/pilot",
+    database_url: SecretStr = Field(
+        default=SecretStr("postgresql+psycopg://pilot:pilot_password@localhost:5432/pilot"),
         description="Database connection URL",
     )
 
     # LLM Provider Configuration
-    openai_api_key: Optional[str] = Field(
+    openai_api_key: SecretStr | None = Field(
         default=None,
         description="OpenAI API key for structured claim extraction and goal compilation",
     )
@@ -27,15 +26,9 @@ class Settings(BaseSettings):
     )
 
     # External APIs
-    github_token: Optional[str] = Field(
+    github_token: SecretStr | None = Field(
         default=None,
         description="Optional personal GitHub token to avoid public rate-limiting",
-    )
-
-    # Vector Embeddings
-    embedding_dim: int = Field(
-        default=1536,
-        description="Dimensionality for semantic claim embeddings (pgvector)",
     )
 
     # Application Environment
