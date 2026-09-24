@@ -32,14 +32,11 @@ def assert_assessment_grounding_invariant(
     stmt = select(EvidenceClaim).where(EvidenceClaim.id.in_(claim_uuids))
     db_claims = session.scalars(stmt).all()
 
-    assert (
-        len(db_claims) == len(claim_uuids)
-    ), f"Grounding violation: {len(claim_uuids) - len(db_claims)} cited claim IDs do not exist in DB!"
+    missing_count = len(claim_uuids) - len(db_claims)
+    assert len(db_claims) == len(claim_uuids), f"Missing {missing_count} claim IDs"
 
     for claim in db_claims:
-        assert (
-            claim.entity_id == expected_user_id
-        ), f"Grounding violation: claim {claim.id} belongs to entity {claim.entity_id}, expected {expected_user_id}!"
+        assert claim.entity_id == expected_user_id, f"Claim {claim.id} user mismatch"
 
 
 def test_assessment_versioning_and_grounding_invariants(session: Session, seeded_user: User):
