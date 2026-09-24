@@ -364,10 +364,11 @@ def test_pilot_assess_and_explain_commands(monkeypatch):
         )
         session.add(claim)
 
-        company = Company(name="CloudScale Corp", domain="cloudscale.io")
+        company = Company(id=uuid.uuid4(), name="CloudScale Corp", domain="cloudscale.io")
         session.add(company)
 
         role = Role(
+            id=uuid.uuid4(),
             company_id=company.id,
             title="Principal Distributed Systems Engineer",
             location_type="remote",
