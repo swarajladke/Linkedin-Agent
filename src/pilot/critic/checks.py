@@ -393,8 +393,7 @@ def factual_check(
         re.IGNORECASE,
     )
     ref_metrics = {
-        re.sub(r"\s+", "", m.group(0).lower())
-        for m in metric_pattern.finditer(ref_corpus)
+        re.sub(r"\s+", "", m.group(0).lower()) for m in metric_pattern.finditer(ref_corpus)
     }
     for match in metric_pattern.finditer(artifact):
         full_match = match.group(0)
