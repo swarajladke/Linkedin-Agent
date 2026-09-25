@@ -325,7 +325,6 @@ def factual_check(
             ref_parts.append(company.name)
 
     ref_corpus = " ".join(ref_parts)
-    ref_corpus_lower = ref_corpus.lower()
 
     # 1. Durations (e.g. "5 years", "3 years", "6 months", "five years")
     duration_pattern = re.compile(
