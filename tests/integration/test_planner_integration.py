@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from pilot.db.models import (
@@ -188,7 +188,7 @@ def test_rollback_on_failure_zero_orphan_actions(session: Session):
     now = datetime(2026, 3, 1, 10, 0, tzinfo=UTC)
 
     user, goal, strategy = _seed_world(session, n_roles=2, now=now)
-    initial_action_count = session.scalar(select(Action.id).count()) or 0
+    initial_action_count = session.scalar(select(func.count()).select_from(Action)) or 0
 
     # Monkey-patch execute to fail
     from pilot.planner import cycle as cycle_mod
@@ -206,10 +206,9 @@ def test_rollback_on_failure_zero_orphan_actions(session: Session):
         cycle_mod.execute = original_execute
 
     # After rollback, no new orphan actions
-    final_action_count = session.scalar(select(Action.id).count()) or 0
-    assert final_action_count == initial_action_count, (
-        f"Orphan actions detected: {final_action_count - initial_action_count} extra"
-    )
+    final_action_count = session.scalar(select(func.count()).select_from(Action)) or 0
+    extra = final_action_count - initial_action_count
+    assert final_action_count == initial_action_count, f"Orphan actions detected: {extra} extra"
 
 
 @pytest.mark.integration
@@ -267,18 +266,18 @@ def test_dry_run_no_db_writes(session: Session):
 
     user, goal, strategy = _seed_world(session, n_roles=3, now=now)
 
-    before_cycles = session.scalar(select(Cycle.id).count()) or 0
-    before_actions = session.scalar(select(Action.id).count()) or 0
-    before_escalations = session.scalar(select(Escalation.id).count()) or 0
+    before_cycles = session.scalar(select(func.count()).select_from(Cycle)) or 0
+    before_actions = session.scalar(select(func.count()).select_from(Action)) or 0
+    before_escalations = session.scalar(select(func.count()).select_from(Escalation)) or 0
 
     result = run_cycle(session, goal, now=now, dry_run=True)
 
     assert result.dry_run is True
     assert result.cycle_id is None
 
-    after_cycles = session.scalar(select(Cycle.id).count()) or 0
-    after_actions = session.scalar(select(Action.id).count()) or 0
-    after_escalations = session.scalar(select(Escalation.id).count()) or 0
+    after_cycles = session.scalar(select(func.count()).select_from(Cycle)) or 0
+    after_actions = session.scalar(select(func.count()).select_from(Action)) or 0
+    after_escalations = session.scalar(select(func.count()).select_from(Escalation)) or 0
 
     assert after_cycles == before_cycles, "Dry run wrote a cycle row"
     assert after_actions == before_actions, "Dry run wrote action rows"
