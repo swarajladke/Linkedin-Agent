@@ -28,6 +28,7 @@ from pilot.db.models import (
     Strategy,
     User,
     WritingSample,
+    CriticReview,
 )
 from pilot.db.session import get_db_session, get_engine
 from pilot.extraction import (
@@ -1240,6 +1241,92 @@ def replay(
         if not result.added_action_ids and not result.removed_action_ids:
             rt.add_row("—", "[dim]No change from original selection[/dim]")
         console.print(rt)
+
+
+@app.command("review")
+def review(
+    action_id: Annotated[UUID, typer.Argument(help="UUID of action to inspect critic reviews for")],
+) -> None:
+    """Inspect critic review attempts, check results, and failure details for an action."""
+    run_migrations()
+
+    with get_db_session() as session:
+        reviews = (
+            session.execute(
+                select(CriticReview)
+                .where(CriticReview.action_id == action_id)
+                .order_by(CriticReview.attempt.asc())
+            )
+            .scalars()
+            .all()
+        )
+
+        if not reviews:
+            console.print(f"[yellow]No critic reviews found for Action {action_id}.[/yellow]")
+            return
+
+        console.print(
+            Panel(
+                f"[bold cyan]Critic Verification Gate: Action {action_id}[/bold cyan]\n"
+                f"Total Evaluation Attempts: {len(reviews)}",
+                expand=False,
+            )
+        )
+
+        for rev in reviews:
+            verdict_color = (
+                "green"
+                if rev.verdict == "pass"
+                else ("yellow" if rev.verdict == "regenerate" else "red")
+            )
+            title = (
+                f"Attempt #{rev.attempt} — Verdict: "
+                f"[{verdict_color}]{rev.verdict.upper()}[/{verdict_color}]"
+            )
+            rev_table = Table(title=title)
+            rev_table.add_column("Check", style="bold")
+            rev_table.add_column("Status")
+            rev_table.add_column("Details")
+
+            rev_table.add_row(
+                "Grounding",
+                "[green]✓ PASS[/green]" if rev.grounding_passed else "[red]✗ FAIL[/red]",
+                "Verbatim claim provenance check",
+            )
+            rev_table.add_row(
+                "Voice Consistency",
+                "[green]✓ PASS[/green]" if rev.voice_passed else "[red]✗ FAIL[/red]",
+                "Statistical voice & banned cliché check",
+            )
+            rev_table.add_row(
+                "Factual Integrity",
+                "[green]✓ PASS[/green]" if rev.factual_passed else "[red]✗ FAIL[/red]",
+                "Entity, metric & duration inflation check",
+            )
+            console.print(rev_table)
+
+            failures = rev.failures or []
+            if failures:
+                fail_table = Table(
+                    title=f"Attempt #{rev.attempt} Failures ({len(failures)})",
+                    style="red",
+                )
+                fail_table.add_column("Check", style="cyan")
+                fail_table.add_column("Severity", style="bold red")
+                fail_table.add_column("Offending Text", style="yellow")
+                fail_table.add_column("Reason")
+
+                for f in failures:
+                    fail_table.add_row(
+                        f.get("check", "—"),
+                        f.get("severity", "—").upper(),
+                        f.get("offending_text", "—"),
+                        f.get("detail", "—"),
+                    )
+                console.print(fail_table)
+            else:
+                console.print("[dim green]  No defects detected on this attempt.[/dim green]\n")
+
 
 
 @voice_app.command("add")
