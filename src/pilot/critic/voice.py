@@ -270,4 +270,14 @@ def get_user_voice_profile(session: Session, user_id: UUID) -> VoiceProfile:
     samples = session.execute(stmt).scalars().all()
     if not samples:
         return build_voice_profile([])
-    return build_voice_profile([s.raw_text for s in samples])
+
+    custom_banned: set[str] = set()
+    for s in samples:
+        if s.voice_profile and isinstance(s.voice_profile, dict):
+            for bp in s.voice_profile.get("banned_phrases", []):
+                custom_banned.add(bp)
+
+    return build_voice_profile(
+        [s.raw_text for s in samples],
+        custom_banned_phrases=list(custom_banned),
+    )
