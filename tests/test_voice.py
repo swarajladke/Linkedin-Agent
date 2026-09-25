@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from pilot.critic.voice import (
     DEFAULT_BANNED_PHRASES,
     build_voice_profile,
