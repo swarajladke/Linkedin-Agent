@@ -876,9 +876,7 @@ class WritingSample(Base):
 
     __tablename__ = "writing_samples"
     __table_args__ = (
-        UniqueConstraint(
-            "user_id", "content_hash", name="uq_writing_samples_user_id_content_hash"
-        ),
+        UniqueConstraint("user_id", "content_hash", name="uq_writing_samples_user_id_content_hash"),
         Index("ix_writing_samples_user_id", "user_id"),
     )
 
@@ -957,4 +955,3 @@ class CriticReview(Base):
 
     # Relationships
     action: Mapped["Action"] = relationship("Action", back_populates="critic_reviews")
-

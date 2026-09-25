@@ -111,7 +111,9 @@ class CriticFailure(BaseModel):
     check: str = Field(description="Check name: 'grounding' | 'voice' | 'factual'")
     severity: FailureSeverity = Field(description="Severity: 'blocking' or 'advisory'")
     detail: str = Field(description="Detailed explanation of the failure")
-    offending_text: str = Field(description="Specific substring in the artifact that triggered failure")
+    offending_text: str = Field(
+        description="Specific substring in the artifact that triggered failure"
+    )
 
 
 class CheckResult(BaseModel):

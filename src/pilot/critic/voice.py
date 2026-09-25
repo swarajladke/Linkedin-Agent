@@ -103,7 +103,9 @@ def build_voice_profile(
         banned = sorted(set(DEFAULT_BANNED_PHRASES + list(custom_banned_phrases or [])))
         return VoiceProfile(banned_phrases=banned, sample_count=0, total_words=0)
 
-    combined_text = "\n\n".join(_extract_text(s).strip() for s in samples if _extract_text(s).strip())
+    combined_text = "\n\n".join(
+        _extract_text(s).strip() for s in samples if _extract_text(s).strip()
+    )
     if not combined_text:
         banned = sorted(set(DEFAULT_BANNED_PHRASES + list(custom_banned_phrases or [])))
         return VoiceProfile(banned_phrases=banned, sample_count=len(samples), total_words=0)
@@ -115,9 +117,7 @@ def build_voice_profile(
     # 2. Sentences
     raw_sentences = re.split(r"(?<=[.!?])\s+", combined_text)
     sentences = [s.strip() for s in raw_sentences if s.strip()]
-    sentence_lengths = [
-        len(re.findall(r"\b[A-Za-z0-9'-]+\b", s)) for s in sentences
-    ]
+    sentence_lengths = [len(re.findall(r"\b[A-Za-z0-9'-]+\b", s)) for s in sentences]
     sentence_lengths = [length for length in sentence_lengths if length > 0]
 
     if sentence_lengths:
@@ -135,9 +135,7 @@ def build_voice_profile(
 
     # 3. Paragraphs
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n+", combined_text) if p.strip()]
-    para_lengths = [
-        len(re.findall(r"\b[A-Za-z0-9'-]+\b", p)) for p in paragraphs
-    ]
+    para_lengths = [len(re.findall(r"\b[A-Za-z0-9'-]+\b", p)) for p in paragraphs]
     mean_paragraph_length = (
         round(float(sum(para_lengths) / len(para_lengths)), 4) if para_lengths else 0.0
     )
@@ -148,15 +146,11 @@ def build_voice_profile(
         combined_text,
         re.IGNORECASE,
     )
-    contraction_rate = (
-        round(float(len(contractions) / total_words), 4) if total_words > 0 else 0.0
-    )
+    contraction_rate = round(float(len(contractions) / total_words), 4) if total_words > 0 else 0.0
 
     # 5. First-person pronoun rate
     fp_count = sum(1 for w in all_words if w.lower() in FIRST_PERSON_PRONOUNS)
-    first_person_pronoun_rate = (
-        round(float(fp_count / total_words), 4) if total_words > 0 else 0.0
-    )
+    first_person_pronoun_rate = round(float(fp_count / total_words), 4) if total_words > 0 else 0.0
 
     # 6. Passive voice rate
     passive_matches = PASSIVE_PATTERN.findall(combined_text)
@@ -170,19 +164,13 @@ def build_voice_profile(
     # 8. Punctuation frequencies (per 100 words)
     factor = 100.0 / total_words if total_words > 0 else 0.0
     exclamation_freq = round(float(combined_text.count("!") * factor), 4)
-    em_dash_count = (
-        combined_text.count("—")
-        + combined_text.count("--")
-        + combined_text.count("–")
-    )
+    em_dash_count = combined_text.count("—") + combined_text.count("--") + combined_text.count("–")
     em_dash_freq = round(float(em_dash_count * factor), 4)
     semicolon_freq = round(float(combined_text.count(";") * factor), 4)
 
     # 9. Type-token ratio
     unique_words = {w.lower() for w in all_words}
-    type_token_ratio = (
-        round(float(len(unique_words) / total_words), 4) if total_words > 0 else 0.0
-    )
+    type_token_ratio = round(float(len(unique_words) / total_words), 4) if total_words > 0 else 0.0
 
     # 10. Common sentence openers
     openers: list[str] = []

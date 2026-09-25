@@ -61,7 +61,9 @@ from pilot.sourcing.config import load_boards_config
 app = typer.Typer(no_args_is_help=True, help="Pilot: Goal-directed autonomous career agent CLI.")
 goal_app = typer.Typer(no_args_is_help=True, help="Manage candidate goals and strategy versions.")
 cycle_app = typer.Typer(no_args_is_help=True, help="Run and inspect decision cycles.")
-voice_app = typer.Typer(no_args_is_help=True, help="Manage writing samples and statistical voice profile.")
+voice_app = typer.Typer(
+    no_args_is_help=True, help="Manage writing samples and statistical voice profile."
+)
 app.add_typer(goal_app, name="goal")
 app.add_typer(cycle_app, name="cycle")
 app.add_typer(voice_app, name="voice")
@@ -1346,7 +1348,9 @@ def voice_show() -> None:
         stats_table.add_row("Sentence Length Variance", f"{profile.sentence_length_variance:.2f}")
         stats_table.add_row("Mean Paragraph Length", f"{profile.mean_paragraph_length:.2f} words")
         stats_table.add_row("Contraction Rate", f"{profile.contraction_rate:.4f} per word")
-        stats_table.add_row("1st-Person Pronoun Rate", f"{profile.first_person_pronoun_rate:.4f} per word")
+        stats_table.add_row(
+            "1st-Person Pronoun Rate", f"{profile.first_person_pronoun_rate:.4f} per word"
+        )
         stats_table.add_row("Passive Voice Rate", f"{profile.passive_voice_rate:.4f} per sent")
         stats_table.add_row("Hedging Rate", f"{profile.hedging_rate:.4f} per word")
         stats_table.add_row("Exclamation Frequency", f"{profile.exclamation_freq:.2f} / 100 words")
@@ -1359,8 +1363,8 @@ def voice_show() -> None:
         )
         stats_table.add_row(
             "Banned Clichés",
-            ", ".join(profile.banned_phrases[:8]) + ("..." if len(profile.banned_phrases) > 8 else ""),
+            ", ".join(profile.banned_phrases[:8])
+            + ("..." if len(profile.banned_phrases) > 8 else ""),
         )
 
         console.print(stats_table)
-
