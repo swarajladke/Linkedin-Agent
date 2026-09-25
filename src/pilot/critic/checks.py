@@ -366,13 +366,14 @@ def factual_check(
             )
 
     # 2. Percentages (e.g. "45%", "99.9%", "20 percent")
-    pct_pattern = re.compile(r"\b(\d+(?:\.\d+)?)\s*(%|percent)\b", re.IGNORECASE)
+    pct_pattern = re.compile(r"\b(\d+(?:\.\d+)?)\s*(%|percent\b)", re.IGNORECASE)
+    ref_pct_values = {m.group(1) for m in pct_pattern.finditer(ref_corpus)}
     for match in pct_pattern.finditer(artifact):
         full_match = match.group(0)
         val = match.group(1)
 
-        # Check if the number appears with % or percent in reference corpus
-        if val not in ref_corpus:
+        # Check if this percentage value appears in reference corpus
+        if val not in ref_pct_values:
             failures.append(
                 CriticFailure(
                     check="factual",
@@ -387,14 +388,20 @@ def factual_check(
 
     # 3. Explicit performance metrics (e.g. "10x", "$5M", "50ms")
     metric_pattern = re.compile(
-        r"\b(\d+(?:\.\d+)?[xX]|\$\d+(?:\.\d+)?[kKmMbB]?|\d+\s*(?:ms|rps|qps|tps|gb|tb|mb))\b"
+        r"(?:(?:\$|\b)\d+(?:\.\d+)?[kKmMbB]?\b|"
+        r"\b\d+(?:\.\d+)?[xX]\b|"
+        r"\b\d+\s*(?:ms|rps|qps|tps|gb|tb|mb)\b)",
+        re.IGNORECASE,
     )
+    ref_metrics = {
+        re.sub(r"\s+", "", m.group(0).lower())
+        for m in metric_pattern.finditer(ref_corpus)
+    }
     for match in metric_pattern.finditer(artifact):
         full_match = match.group(0)
         norm_match = re.sub(r"\s+", "", full_match.lower())
-        norm_ref = re.sub(r"\s+", "", ref_corpus_lower)
 
-        if norm_match not in norm_ref:
+        if norm_match not in ref_metrics:
             failures.append(
                 CriticFailure(
                     check="factual",
