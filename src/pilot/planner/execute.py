@@ -200,7 +200,8 @@ def execute(
 
     if rev1.verdict == CriticVerdict.REGENERATE:
         # Attempt 2: Redraft with failures as feedback
-        offending_texts = [f.offending_text.lower() for f in rev1.failures]
+        blocking_failures = [f for f in rev1.failures if f.severity.value == "blocking"]
+        offending_texts = [f.offending_text.lower() for f in blocking_failures if f.offending_text]
         repaired_bullets = [
             b for b in bullets if not any(off in b.lower() for off in offending_texts)
         ]
@@ -209,7 +210,9 @@ def execute(
                 f"• Role alignment verified against {role.title} requirements summary."
             ]
 
-        repaired_summary = f"Software engineer aligned with {role.title} at {company_name}."
+        repaired_summary = (
+            f"Experienced software engineer aligned with {role.title} at {company_name}."
+        )
 
         repaired_package = DraftApplicationPackage(
             role_id=role.id,

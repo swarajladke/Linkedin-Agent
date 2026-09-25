@@ -33,7 +33,7 @@ FRAMING_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"^with\s+enthusiasm\b", re.IGNORECASE),
     re.compile(r"^role\s+alignment\s+verified\b", re.IGNORECASE),
     re.compile(r"^application\s+package\s+grounded\b", re.IGNORECASE),
-    re.compile(r"^experienced\s+software\s+engineer\b", re.IGNORECASE),
+    re.compile(r"^(?:experienced\s+)?(?:software\s+)?(?:engineer|developer)\b", re.IGNORECASE),
 ]
 
 # Word-to-digit conversion dictionary for durations
