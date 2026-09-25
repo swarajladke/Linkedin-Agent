@@ -82,9 +82,7 @@ class Critic:
         v_res = voice_check(artifact_text, profile)
         f_res = factual_check(artifact_text, claims, role)
 
-        all_failures: list[CriticFailure] = (
-            g_res.failures + v_res.failures + f_res.failures
-        )
+        all_failures: list[CriticFailure] = g_res.failures + v_res.failures + f_res.failures
         has_blocking = any(f.severity == FailureSeverity.BLOCKING for f in all_failures)
 
         if has_blocking:

@@ -205,8 +205,7 @@ def grounding_check(
                         check="grounding",
                         severity=FailureSeverity.BLOCKING,
                         detail=(
-                            f"Ungrounded assertion: '{raw_stmt}' does not match "
-                            "any evidence claim."
+                            f"Ungrounded assertion: '{raw_stmt}' does not match any evidence claim."
                         ),
                         offending_text=raw_stmt,
                     )

@@ -1328,7 +1328,6 @@ def review(
                 console.print("[dim green]  No defects detected on this attempt.[/dim green]\n")
 
 
-
 @voice_app.command("add")
 def voice_add(
     path: Annotated[Path, typer.Argument(help="Path to writing sample file (.txt, .md, .pdf)")],

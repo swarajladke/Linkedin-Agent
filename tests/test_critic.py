@@ -137,9 +137,9 @@ def test_clean_grounded_in_voice_draft_passes():
     """A clean, grounded, in-voice draft passes all checks with verdict PASS."""
     claims = _make_sample_claims()
     role = _make_sample_role()
-    profile = build_voice_profile([
-        "I build software systems. We deploy services to cloud environments with Kubernetes."
-    ])
+    profile = build_voice_profile(
+        ["I build software systems. We deploy services to cloud environments with Kubernetes."]
+    )
 
     draft = (
         "I am excited about the Senior Backend Engineer role. "
