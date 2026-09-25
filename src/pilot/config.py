@@ -24,6 +24,10 @@ class Settings(BaseSettings):
         default="gpt-4o-mini",
         description="Model to use for structured output extraction",
     )
+    critic_model: str = Field(
+        default="gpt-4o-mini",
+        description="Model to use for critic structured decomposition",
+    )
 
     # External APIs
     github_token: SecretStr | None = Field(

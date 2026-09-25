@@ -96,6 +96,9 @@ class User(Base):
     goals: Mapped[list["Goal"]] = relationship(
         "Goal", back_populates="user", cascade="all, delete-orphan"
     )
+    writing_samples: Mapped[list["WritingSample"]] = relationship(
+        "WritingSample", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Goal(Base):
@@ -628,6 +631,9 @@ class Action(Base):
         cascade="all, delete-orphan",
     )
     escalations: Mapped[list["Escalation"]] = relationship("Escalation", back_populates="action")
+    critic_reviews: Mapped[list["CriticReview"]] = relationship(
+        "CriticReview", back_populates="action", cascade="all, delete-orphan"
+    )
 
     # Read-only association proxy to human-readable strategy version (single source of truth)
     strategy_version: AssociationProxy[int | None] = association_proxy("strategy", "version")
@@ -860,3 +866,95 @@ class Escalation(Base):
     # Relationships
     goal: Mapped["Goal"] = relationship("Goal", back_populates="escalations")
     action: Mapped[Optional["Action"]] = relationship("Action", back_populates="escalations")
+
+
+# ============================================================================
+# Critic Gate & Voice Verification Models
+# ============================================================================
+class WritingSample(Base):
+    """Writing sample ingested for a candidate user to build statistical voice profiles."""
+
+    __tablename__ = "writing_samples"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "content_hash", name="uq_writing_samples_user_id_content_hash"
+        ),
+        Index("ix_writing_samples_user_id", "user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    content_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    spans: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    )
+    word_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+    voice_profile: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="writing_samples")
+
+
+class CriticReview(Base):
+    """Evaluation attempt of a generated action artifact through the critic verification gate."""
+
+    __tablename__ = "critic_reviews"
+    __table_args__ = (
+        UniqueConstraint("action_id", "attempt", name="uq_critic_reviews_action_id_attempt"),
+        Index("ix_critic_reviews_action_id", "action_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
+    action_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("actions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    artifact_text: Mapped[str] = mapped_column(Text, nullable=False)
+    grounding_passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    voice_passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    factual_passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    verdict: Mapped[str] = mapped_column(String(20), nullable=False)
+    failures: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    )
+    reviewed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    # Relationships
+    action: Mapped["Action"] = relationship("Action", back_populates="critic_reviews")
+

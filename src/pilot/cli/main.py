@@ -27,6 +27,7 @@ from pilot.db.models import (
     RoleStatus,
     Strategy,
     User,
+    WritingSample,
 )
 from pilot.db.session import get_db_session, get_engine
 from pilot.extraction import (
@@ -60,8 +61,10 @@ from pilot.sourcing.config import load_boards_config
 app = typer.Typer(no_args_is_help=True, help="Pilot: Goal-directed autonomous career agent CLI.")
 goal_app = typer.Typer(no_args_is_help=True, help="Manage candidate goals and strategy versions.")
 cycle_app = typer.Typer(no_args_is_help=True, help="Run and inspect decision cycles.")
+voice_app = typer.Typer(no_args_is_help=True, help="Manage writing samples and statistical voice profile.")
 app.add_typer(goal_app, name="goal")
 app.add_typer(cycle_app, name="cycle")
+app.add_typer(voice_app, name="voice")
 
 console = Console()
 
@@ -1235,3 +1238,129 @@ def replay(
         if not result.added_action_ids and not result.removed_action_ids:
             rt.add_row("—", "[dim]No change from original selection[/dim]")
         console.print(rt)
+
+
+@voice_app.command("add")
+def voice_add(
+    path: Annotated[Path, typer.Argument(help="Path to writing sample file (.txt, .md, .pdf)")],
+) -> None:
+    """Ingest a candidate writing sample and compute statistical voice metrics."""
+    from pilot.critic.voice import ingest_writing_sample
+
+    run_migrations()
+
+    if not path.is_file():
+        console.print(f"[red]Writing sample file not found at {path}[/red]")
+        raise typer.Exit(1)
+
+    with get_db_session() as session:
+        try:
+            user = resolve_active_user(session)
+        except CLIUserError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1) from None
+
+        try:
+            sample = ingest_writing_sample(session, user.id, path)
+        except Exception as e:
+            console.print(f"[red]Failed to ingest writing sample: {e}[/red]")
+            raise typer.Exit(1) from None
+
+        vp = sample.voice_profile or {}
+
+        console.print(
+            Panel(
+                f"[bold green]✓ Ingested Writing Sample[/bold green]\n"
+                f"  Sample ID:     {sample.id}\n"
+                f"  Candidate:     {user.full_name}\n"
+                f"  Content Type:  {sample.content_type}\n"
+                f"  Words:         {sample.word_count}\n"
+                f"  Mean Sent Len: {vp.get('mean_sentence_length', 0.0)} words\n"
+                f"  Contractions:  {vp.get('contraction_rate', 0.0):.4f}\n"
+                f"  Passive Voice: {vp.get('passive_voice_rate', 0.0):.4f}\n"
+                f"  Pronoun Rate:  {vp.get('first_person_pronoun_rate', 0.0):.4f}",
+                title="Voice Ingestion",
+                expand=False,
+            )
+        )
+
+
+@voice_app.command("show")
+def voice_show() -> None:
+    """Display the active candidate's writing samples and aggregate statistical voice profile."""
+    from pilot.critic.voice import get_user_voice_profile
+
+    run_migrations()
+
+    with get_db_session() as session:
+        try:
+            user = resolve_active_user(session)
+        except CLIUserError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1) from None
+
+        samples = (
+            session.execute(
+                select(WritingSample)
+                .where(WritingSample.user_id == user.id)
+                .order_by(WritingSample.created_at.asc())
+            )
+            .scalars()
+            .all()
+        )
+
+        if not samples:
+            console.print(
+                "[yellow]No writing samples found for candidate.[/yellow]\n"
+                "Run 'pilot voice add <path>' with blog posts, cover letters, or essays."
+            )
+            return
+
+        table = Table(title=f"Writing Samples for {user.full_name}")
+        table.add_column("Sample ID", style="cyan")
+        table.add_column("Type", style="green")
+        table.add_column("Words", justify="right")
+        table.add_column("Source URL")
+        table.add_column("Created", style="dim")
+
+        for s in samples:
+            table.add_row(
+                str(s.id)[:8],
+                s.content_type,
+                str(s.word_count),
+                s.source_url or "—",
+                s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "—",
+            )
+        console.print(table)
+
+        profile = get_user_voice_profile(session, user.id)
+
+        stats_table = Table(title="Aggregate Statistical Voice Profile")
+        stats_table.add_column("Metric", style="bold")
+        stats_table.add_column("Value", style="cyan")
+
+        stats_table.add_row("Samples Analyzed", str(profile.sample_count))
+        stats_table.add_row("Total Words", str(profile.total_words))
+        stats_table.add_row("Mean Sentence Length", f"{profile.mean_sentence_length:.2f} words")
+        stats_table.add_row("Median Sentence Length", f"{profile.median_sentence_length:.2f} words")
+        stats_table.add_row("Sentence Length Variance", f"{profile.sentence_length_variance:.2f}")
+        stats_table.add_row("Mean Paragraph Length", f"{profile.mean_paragraph_length:.2f} words")
+        stats_table.add_row("Contraction Rate", f"{profile.contraction_rate:.4f} per word")
+        stats_table.add_row("1st-Person Pronoun Rate", f"{profile.first_person_pronoun_rate:.4f} per word")
+        stats_table.add_row("Passive Voice Rate", f"{profile.passive_voice_rate:.4f} per sent")
+        stats_table.add_row("Hedging Rate", f"{profile.hedging_rate:.4f} per word")
+        stats_table.add_row("Exclamation Frequency", f"{profile.exclamation_freq:.2f} / 100 words")
+        stats_table.add_row("Em-Dash Frequency", f"{profile.em_dash_freq:.2f} / 100 words")
+        stats_table.add_row("Semicolon Frequency", f"{profile.semicolon_freq:.2f} / 100 words")
+        stats_table.add_row("Lexical Diversity (TTR)", f"{profile.type_token_ratio:.4f}")
+        stats_table.add_row(
+            "Common Openers",
+            ", ".join(profile.common_sentence_openers) if profile.common_sentence_openers else "—",
+        )
+        stats_table.add_row(
+            "Banned Clichés",
+            ", ".join(profile.banned_phrases[:8]) + ("..." if len(profile.banned_phrases) > 8 else ""),
+        )
+
+        console.print(stats_table)
+

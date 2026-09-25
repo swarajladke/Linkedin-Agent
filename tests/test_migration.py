@@ -416,6 +416,120 @@ def test_full_migration_lifecycle_and_constraints(db_engine):
 
         trans.rollback()
 
-    # 9. Test downgrade to base and restore to head for subsequent tests
+    # 9. Test Migration 0004: UniqueConstraint on writing_samples and critic_reviews
+    with db_engine.connect() as connection:
+        trans = connection.begin()
+        user_id = uuid.uuid4()
+        goal_id = uuid.uuid4()
+        strategy_id = uuid.uuid4()
+        action_id = uuid.uuid4()
+        sample_hash = "f" * 64
+
+        connection.execute(
+            text(
+                """
+                INSERT INTO users (id, email, full_name)
+                VALUES (:user_id, 'writer@example.com', 'Sam Writer')
+                """
+            ),
+            {"user_id": user_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO writing_samples (
+                    id, user_id, content_type, content_hash, raw_text, spans, word_count
+                ) VALUES (
+                    gen_random_uuid(), :user_id, 'text', :content_hash, 'Sample writing text', '[]'::jsonb, 3
+                )
+                """
+            ),
+            {"user_id": user_id, "content_hash": sample_hash},
+        )
+
+        # Duplicate writing sample content_hash for same user must fail
+        with pytest.raises(IntegrityError):
+            with connection.begin_nested():
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO writing_samples (
+                            id, user_id, content_type, content_hash, raw_text, spans, word_count
+                        ) VALUES (
+                            gen_random_uuid(), :user_id, 'text', :content_hash, 'Duplicate sample', '[]'::jsonb, 2
+                        )
+                        """
+                    ),
+                    {"user_id": user_id, "content_hash": sample_hash},
+                )
+
+        # Setup goal, strategy, action for critic_reviews test
+        connection.execute(
+            text(
+                """
+                INSERT INTO goals (id, user_id, objective_text, constraints_json, target_spec, success_criteria, sub_goals, deadline)
+                VALUES (:goal_id, :user_id, 'Land role', '{}', '{}', '{}', '[]', NOW() + INTERVAL '30 days')
+                """
+            ),
+            {"goal_id": goal_id, "user_id": user_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO strategies (id, goal_id, version)
+                VALUES (:strategy_id, :goal_id, 1)
+                """
+            ),
+            {"strategy_id": strategy_id, "goal_id": goal_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO actions (
+                    id, goal_id, strategy_id, action_type, target_type,
+                    reason, predicted_outcome, predicted_probability
+                ) VALUES (
+                    :action_id, :goal_id, :strategy_id, 'generate_application_package', 'role',
+                    'Fit reason', 'Interview', 0.8
+                )
+                """
+            ),
+            {"action_id": action_id, "goal_id": goal_id, "strategy_id": strategy_id},
+        )
+
+        connection.execute(
+            text(
+                """
+                INSERT INTO critic_reviews (
+                    id, action_id, attempt, artifact_text, grounding_passed, voice_passed,
+                    factual_passed, verdict, failures
+                ) VALUES (
+                    gen_random_uuid(), :action_id, 1, 'Draft package 1', true, true, true, 'pass', '[]'::jsonb
+                )
+                """
+            ),
+            {"action_id": action_id},
+        )
+
+        # Duplicate attempt for same action must fail
+        with pytest.raises(IntegrityError):
+            with connection.begin_nested():
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO critic_reviews (
+                            id, action_id, attempt, artifact_text, grounding_passed, voice_passed,
+                            factual_passed, verdict, failures
+                        ) VALUES (
+                            gen_random_uuid(), :action_id, 1, 'Draft package 1 retry', false, true, true, 'regenerate', '[]'::jsonb
+                        )
+                        """
+                    ),
+                    {"action_id": action_id},
+                )
+
+        trans.rollback()
+
+    # 10. Test downgrade to base and restore to head for subsequent tests
     command.downgrade(alembic_cfg, "base")
     command.upgrade(alembic_cfg, "head")
