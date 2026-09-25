@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from pilot.config import get_settings
 from pilot.db.models import (
     Action,
+    CriticReview,
     Cycle,
     EvidenceClaim,
     Goal,
@@ -28,7 +29,6 @@ from pilot.db.models import (
     Strategy,
     User,
     WritingSample,
-    CriticReview,
 )
 from pilot.db.session import get_db_session, get_engine
 from pilot.extraction import (
