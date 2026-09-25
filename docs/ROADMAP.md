@@ -263,7 +263,7 @@ Phase 1 establishes the rock-solid substrate upon which Phase 2 (Job Intelligenc
    Fit score is computed deterministically in Python from structured sub-signals rather than an opaque LLM number. A role with an ungrounded must-have requirement (blocking gap) is mathematically prohibited from returning `apply_now`.
 
 
-## 7. Phase 3: Planner (In Progress)
+## 7. Phase 3: Planner (Complete)
 
 **Objective:** Implement the closed decision loop that is the core research contribution of Pilot — the loop that autonomously prioritizes and takes career actions grounded in evidence and auditable predictions.
 
@@ -310,5 +310,38 @@ $$\text{Observe} \longrightarrow \text{Diagnose} \longrightarrow \text{Generate}
    If a cycle fails mid-execution, the entire transaction is rolled back leaving zero orphan action rows.
 3. **Counterfactual Replay Invariant:**
    $$\text{replay}(\text{cycle}, \text{policy}') \text{ produces no DB writes and a deterministic diff against original selection}$$
+
+
+## 8. Phase 4: Critic (Complete)
+
+**Objective:** Mandatory verification gate inserted between drafting and shipment. No artifact leaves the system unchecked:
+
+$$\text{Draft} \longrightarrow \text{Grounding Check} \longrightarrow \text{Voice Check} \longrightarrow \text{Factual Check} \longrightarrow \text{Pass / Regenerate / Drop}$$
+
+Two consecutive regeneration failures result in an immediate drop without escalation. Every attempt is persisted to `critic_reviews` to provide an unfalsifiable audit trail.
+
+### Phase 4 Progress Dashboard
+
+| # | Step Name | Scope & Key Deliverables | Status |
+| :-: | :--- | :--- | :-: |
+| **4.1** | **Migration 0004 & Models** | `writing_samples` (unique `user_id, content_hash`) and `critic_reviews` (unique `action_id, attempt`, index on `action_id`). Symmetrical downgrade, zero-diff `alembic check`. | **COMPLETED** |
+| **4.2** | **Writing Sample Ingestion & Voice Profile** | `ResumeReader` writing sample parser; pure statistical voice profiling (sentence length, variance, contraction rate, passive voice rate, pronoun frequency, type-token ratio, banned clichés). | **COMPLETED** |
+| **4.3** | **Grounding, Voice & Factual Checks** | Structured LLM statement decomposition with framing exemption; deterministic statistical voice and banned cliché filtering; regex/parser factual extraction (dates, durations, metrics, quantities). | **COMPLETED** |
+| **4.4** | **Planner Gate Integration** | Rewire `execute()` through `Critic.review()`. Automatic regeneration feedback loop with max 2 attempts. Drop logging with funnel visibility; application creation gated on pass. | **COMPLETED** |
+| **4.5** | **CLI Extensions** | `pilot voice add <path>`, `pilot voice show`, `pilot review <action_id>` comprehensive attempt visualizer, and `pilot cycle run` passed / regenerated / dropped counts. | **COMPLETED** |
+| **4.6** | **Invariant & Integrity Test Suite** | Defect rejection unit tests (unsupported employers, 3-to-5-year duration inflation, metric fabrication, banned clichés); integration tests for drop, repair, sample idempotency, and aggregate DB escalation invariant. | **COMPLETED** |
+
+### Phase 4 Core System Guarantees & Exit Criteria
+
+1. **The "Nothing Unchecked Ships" Guarantee:**
+   $$\forall e \in \text{escalations}, \quad \exists r \in \text{critic\_reviews} \text{ where } r.\text{action\_id} = e.\text{action\_id} \land r.\text{verdict} = \text{'pass'}$$
+   Every artifact escalated for human review is mathematically guaranteed to trace directly to an evaluation attempt in `critic_reviews` with `verdict = 'pass'`. Dropped actions never produce an `Escalation` row.
+2. **Finite Regeneration Bound Guarantee:**
+   $$\text{attempts} \leq 2$$
+   The critic gate strictly caps regeneration attempts at 2. Any blocking defect on attempt 2 drops the action and writes a structured drop record to `actions.actual_outcome`.
+3. **Purely Deterministic Voice & Factual Verification:**
+   Voice profiling and factual integrity checks never invoke an LLM. Only grounding decomposition uses structured classification, guaranteeing high-speed deterministic enforcement of banned buzzwords, duration inflation, and fabricated quantities.
+4. **Idempotent Sample Ingestion Invariant:**
+   Writing samples are indexed by SHA-256 hash per user, ensuring multiple ingestions of identical writing samples result in zero duplicate database rows.
 
 

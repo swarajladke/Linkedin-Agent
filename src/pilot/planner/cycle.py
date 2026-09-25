@@ -144,19 +144,20 @@ def run_cycle(
                 prior=item.predicted_probability,
             )
 
-            # Execute action
-            exec_res = execute(session, action, now=now)
+            # Execute action through Critic gate
+            exec_res = execute(session, action, now=now, llm=llm)
             execution_results.append(exec_res)
 
-            # Record candidate application in world model
-            app = Application(
-                goal_id=goal.id,
-                role_id=c.role_id,
-                stage=ApplicationStage.APPLIED,
-                applied_at=now,
-                notes=f"Applied via Pilot Cycle #{cycle_number}",
-            )
-            session.add(app)
+            # Record candidate application in world model ONLY if action passed critic gate
+            if not exec_res.dropped:
+                app = Application(
+                    goal_id=goal.id,
+                    role_id=c.role_id,
+                    stage=ApplicationStage.APPLIED,
+                    applied_at=now,
+                    notes=f"Applied via Pilot Cycle #{cycle_number}",
+                )
+                session.add(app)
 
         cycle.completed_at = now
         session.commit()

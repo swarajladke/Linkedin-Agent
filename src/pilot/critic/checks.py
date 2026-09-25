@@ -315,6 +315,8 @@ def factual_check(
         ref_parts.append(c.claim)
         if c.source_excerpt:
             ref_parts.append(c.source_excerpt)
+        if c.source_url:
+            ref_parts.append(c.source_url)
 
     if role:
         ref_parts.append(role.title)

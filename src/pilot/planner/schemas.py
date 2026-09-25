@@ -174,8 +174,14 @@ class ExecutionResult(BaseModel):
 
     action_id: UUID
     executed_at: datetime
-    draft_package: DraftApplicationPackage
-    escalation_id: UUID
+    draft_package: DraftApplicationPackage | None = None
+    escalation_id: UUID | None = None
+    dropped: bool = False
+    drop_reason: str | None = None
+    critic_verdict: str = "pass"
+    critic_attempts: int = 1
+    role_title: str | None = None
+    company_name: str | None = None
 
 
 class CycleResult(BaseModel):

@@ -992,14 +992,32 @@ def cycle_run(
             f"Selected: [bold]{result.actions_selected}[/bold] actions"
         )
 
+        passed_count = sum(1 for er in result.execution_results if not er.dropped)
+        regen_count = sum(1 for er in result.execution_results if er.critic_attempts > 1)
+        drop_count = sum(1 for er in result.execution_results if er.dropped)
+
         if result.execution_results:
+            console.print(
+                f"Critic Gate: [bold green]{passed_count} passed[/bold green] | "
+                f"[bold yellow]{regen_count} regenerated[/bold yellow] | "
+                f"[bold red]{drop_count} dropped[/bold red]"
+            )
             et = Table(title="Executed Actions")
             et.add_column("Role")
             et.add_column("Company")
+            et.add_column("Status")
+            et.add_column("Attempts", justify="right")
             et.add_column("Escalation ID")
             for er in result.execution_results:
-                dp = er.draft_package
-                et.add_row(dp.role_title, dp.company_name, str(er.escalation_id)[:8])
+                role_title = er.role_title or (
+                    er.draft_package.role_title if er.draft_package else "—"
+                )
+                comp_name = er.company_name or (
+                    er.draft_package.company_name if er.draft_package else "—"
+                )
+                status_str = "[green]PASSED[/green]" if not er.dropped else "[red]DROPPED[/red]"
+                esc_id = str(er.escalation_id)[:8] if er.escalation_id else "—"
+                et.add_row(role_title, comp_name, status_str, str(er.critic_attempts), esc_id)
             console.print(et)
         elif dry_run and result.selected_actions:
             et = Table(title="Would Execute (Dry Run)")
@@ -1120,17 +1138,27 @@ def cycle_show(
         actions = session.scalars(select(Action).where(Action.cycle_id == cycle.id)).all()
 
         if actions:
-            at = Table(title="Actions Executed")
+            at = Table(title="Actions in Cycle")
             at.add_column("ID")
             at.add_column("Target")
             at.add_column("Pred. Prob.")
             at.add_column("Executed At")
+            at.add_column("Status")
             for a in actions:
+                status_str = "[green]passed[/green]"
+                if a.actual_outcome:
+                    try:
+                        data = json.loads(a.actual_outcome)
+                        if data.get("status") == "dropped":
+                            status_str = "[red]dropped[/red]"
+                    except Exception:
+                        pass
                 at.add_row(
                     str(a.id)[:8],
                     str(a.target_id)[:8],
                     f"{a.predicted_probability:.2f}" if a.predicted_probability else "—",
                     str(a.executed_at)[:19] if a.executed_at else "—",
+                    status_str,
                 )
             console.print(at)
         else:
