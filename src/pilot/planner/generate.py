@@ -27,6 +27,7 @@ def generate_actions(
     session: Session,
     goal: Goal,
     diagnosis: Diagnosis,
+    policy: dict | None = None,
 ) -> list[CandidateAction]:
     """
     Generate candidate application package actions over open, assessed roles.
@@ -34,20 +35,36 @@ def generate_actions(
     Enforces:
     - Exactly one action type: 'generate_application_package'.
     - Excludes roles with an existing Application or unexecuted/pending Action.
-    - Low-fit targeting diagnosis raises the fit-score floor from 0.50 to 0.75.
+    - Low-fit targeting diagnosis raises the fit-score floor from baseline to elevated floor.
     - Blocked or constraint-conflicted goals produce 0 candidate actions.
     - Specific reason naming the diagnosis and assessment evidence claims.
     """
     if diagnosis.category in (DiagnosisCategory.BLOCKED, DiagnosisCategory.CONSTRAINT_CONFLICT):
         return []
 
+    # Read policy parameters
+    pol = policy
+    if pol is None:
+        active_strat = None
+        strategies = getattr(goal, "strategies", []) or []
+        for s in sorted(strategies, key=lambda x: getattr(x, "version", 0), reverse=True):
+            if getattr(s, "retired_at", None) is None:
+                active_strat = s
+                break
+        if active_strat is None and strategies:
+            active_strat = strategies[0]
+        pol = getattr(active_strat, "policy", {}) if active_strat else {}
+
+    base_floor = float(pol.get("fit_floor", 0.50))
+    elevated_floor = float(pol.get("elevated_fit_floor", 0.75))
+
     # Dynamic fit floor based on diagnosis
-    fit_floor = DEFAULT_FIT_FLOOR
+    fit_floor = base_floor
     is_low_fit_starved = any(
         h.cause == RootCauseKind.LOW_FIT_TARGETING for h in diagnosis.hypotheses
     )
     if is_low_fit_starved:
-        fit_floor = ELEVATED_FIT_FLOOR
+        fit_floor = elevated_floor
 
     # Existing applications for this goal
     applied_role_ids = set(

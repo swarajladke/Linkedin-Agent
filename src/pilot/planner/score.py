@@ -14,6 +14,7 @@ def score_actions(
     candidates: list[CandidateAction],
     diagnosis: Diagnosis,
     strategy_notes: list[StrategyNote] | None = None,
+    policy: dict | None = None,
 ) -> list[ScoredAction]:
     """
     Score candidate actions via a deterministic pure expected-value function. No LLM calls.
@@ -28,15 +29,21 @@ def score_actions(
     - Strict determinism: shuffled inputs produce identical output scores and ordering.
     - Tie-breaking: deterministic lexicographical order on role_id.
     """
+    pol = policy or {}
+    urg_apps = float(pol.get("urgency_multiplier_applications", 1.25))
+    urg_resp = float(pol.get("urgency_multiplier_responses", 1.10))
+    urg_other = float(pol.get("urgency_multiplier_other", 1.05))
+    prior_factor = float(pol.get("conversion_prior_factor", DEFAULT_CONVERSION_PRIOR_FACTOR))
+
     # 1. Compute urgency multiplier from diagnosis
     urgency = 1.0
     if diagnosis.category == DiagnosisCategory.STARVED:
         if diagnosis.starved_stage == "applications":
-            urgency = 1.25
+            urgency = urg_apps
         elif diagnosis.starved_stage == "responses":
-            urgency = 1.10
+            urgency = urg_resp
         else:
-            urgency = 1.05
+            urgency = urg_other
 
     # 2. Strategy note adjustments
     strategy_bonus = 0.0
@@ -51,9 +58,7 @@ def score_actions(
     for c in candidates:
         cost = DEFAULT_ACTION_COST
         # Probability prior: derived monotonically from fit_score
-        predicted_prob = round(
-            min(0.95, max(0.05, c.fit_score * DEFAULT_CONVERSION_PRIOR_FACTOR)), 4
-        )
+        predicted_prob = round(min(0.95, max(0.05, c.fit_score * prior_factor)), 4)
 
         # Expected value score
         ev_score = round((c.fit_score * urgency) + strategy_bonus - float(cost), 4)
@@ -84,6 +89,7 @@ def select_actions(
     scored: list[ScoredAction],
     budget: Decimal | float | None = None,
     max_actions: int | None = None,
+    policy: dict | None = None,
 ) -> list[ScoredAction]:
     """
     Select actions respecting financial budget and per-cycle volume caps.
@@ -92,7 +98,12 @@ def select_actions(
     - Halts immediately if total cost would exceed budget.
     - Halts if max_actions (e.g. max_applications_per_day) is reached.
     """
-    max_cap = max_actions if max_actions is not None and max_actions > 0 else len(scored)
+    pol = policy or {}
+    effective_max = max_actions
+    if effective_max is None and "max_applications_per_day" in pol:
+        effective_max = pol.get("max_applications_per_day")
+
+    max_cap = effective_max if effective_max is not None and effective_max > 0 else len(scored)
     budget_limit = Decimal(str(budget)) if budget is not None else None
 
     selected: list[ScoredAction] = []
