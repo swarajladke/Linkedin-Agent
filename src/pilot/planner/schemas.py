@@ -198,6 +198,10 @@ class CycleResult(BaseModel):
     actions_selected: int
     selected_actions: list[ScoredAction] = Field(default_factory=list)
     execution_results: list[ExecutionResult] = Field(default_factory=list)
+    resolution_result: Any | None = None
+    calibration_report: Any | None = None
+    failure_signal: Any | None = None
+    adoption_result: Any | None = None
 
 
 class ReplayResult(BaseModel):
