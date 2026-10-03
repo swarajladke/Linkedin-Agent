@@ -204,6 +204,11 @@ class Strategy(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    policy: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
 
     # Relationships
     goal: Mapped["Goal"] = relationship("Goal", back_populates="strategies")
@@ -563,6 +568,9 @@ class Cycle(Base):
     goal: Mapped["Goal"] = relationship("Goal", back_populates="cycles")
     strategy: Mapped[Optional["Strategy"]] = relationship("Strategy", back_populates="cycles")
     actions: Mapped[list["Action"]] = relationship("Action", back_populates="cycle")
+    strategy_notes: Mapped[list["StrategyNote"]] = relationship(
+        "StrategyNote", back_populates="cycle"
+    )
 
 
 class Action(Base):
@@ -619,6 +627,11 @@ class Action(Base):
     executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     actual_outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
     outcome_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    horizon_days: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("14"),
+    )
 
     # Relationships
     goal: Mapped["Goal"] = relationship("Goal", back_populates="actions")
@@ -790,6 +803,7 @@ class StrategyNote(Base):
     __table_args__ = (
         Index("ix_strategy_notes_goal_id", "goal_id"),
         Index("ix_strategy_notes_strategy_id", "strategy_id"),
+        Index("ix_strategy_notes_cycle_id", "cycle_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -808,8 +822,14 @@ class StrategyNote(Base):
         ForeignKey("strategies.id", ondelete="CASCADE"),
         nullable=False,
     )
+    cycle_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cycles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     hypothesis: Mapped[str] = mapped_column(Text, nullable=False)
     reflection: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[StrategyNoteStatus] = mapped_column(
         Enum(
             StrategyNoteStatus,
@@ -829,6 +849,7 @@ class StrategyNote(Base):
     # Relationships
     goal: Mapped["Goal"] = relationship("Goal", back_populates="strategy_notes")
     strategy: Mapped["Strategy"] = relationship("Strategy", back_populates="notes")
+    cycle: Mapped[Optional["Cycle"]] = relationship("Cycle", back_populates="strategy_notes")
 
 
 class Escalation(Base):

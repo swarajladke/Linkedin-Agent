@@ -530,6 +530,111 @@ def test_full_migration_lifecycle_and_constraints(db_engine):
 
         trans.rollback()
 
-    # 10. Test downgrade to base and restore to head for subsequent tests
+    # 10. Test Migration 0005: strategies.policy, strategy_notes.evidence/cycle_id, actions.horizon_days
+    with db_engine.connect() as connection:
+        trans = connection.begin()
+        user_id = uuid.uuid4()
+        goal_id = uuid.uuid4()
+        strategy_id = uuid.uuid4()
+        cycle_id = uuid.uuid4()
+        action_id = uuid.uuid4()
+        note_id = uuid.uuid4()
+
+        connection.execute(
+            text(
+                "INSERT INTO users (id, email, full_name) VALUES (:id, 'm5@example.com', 'M5 User')"
+            ),
+            {"id": user_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO goals (id, user_id, objective_text, constraints_json, target_spec, success_criteria, sub_goals, deadline)
+                VALUES (:goal_id, :user_id, 'Learning Goal', '{}', '{}', '{}', '[]', NOW() + INTERVAL '30 days')
+                """
+            ),
+            {"goal_id": goal_id, "user_id": user_id},
+        )
+        # Check strategy insertion with policy
+        connection.execute(
+            text(
+                """
+                INSERT INTO strategies (id, goal_id, version, policy)
+                VALUES (:strategy_id, :goal_id, 1, '{"fit_floor": 0.55}'::jsonb)
+                """
+            ),
+            {"strategy_id": strategy_id, "goal_id": goal_id},
+        )
+
+        strat_row = connection.execute(
+            text("SELECT policy FROM strategies WHERE id = :id"),
+            {"id": strategy_id},
+        ).fetchone()
+        assert strat_row is not None
+        assert strat_row[0].get("fit_floor") == 0.55
+
+        # Check cycle and strategy_note with evidence and cycle_id
+        connection.execute(
+            text(
+                """
+                INSERT INTO cycles (
+                    id, goal_id, cycle_number, strategy_id, observation, diagnosis, actions_proposed, actions_selected
+                ) VALUES (
+                    :cycle_id, :goal_id, 1, :strategy_id, '{}', '{}', 1, 1
+                )
+                """
+            ),
+            {"cycle_id": cycle_id, "goal_id": goal_id, "strategy_id": strategy_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO strategy_notes (
+                    id, goal_id, strategy_id, cycle_id, hypothesis, evidence, status
+                ) VALUES (
+                    :note_id, :goal_id, :strategy_id, :cycle_id, 'Raise floor', '{"conversion_drop": 0.05}'::jsonb, 'active'
+                )
+                """
+            ),
+            {
+                "note_id": note_id,
+                "goal_id": goal_id,
+                "strategy_id": strategy_id,
+                "cycle_id": cycle_id,
+            },
+        )
+        note_row = connection.execute(
+            text("SELECT evidence, cycle_id FROM strategy_notes WHERE id = :id"),
+            {"id": note_id},
+        ).fetchone()
+        assert note_row is not None
+        assert note_row[0].get("conversion_drop") == 0.05
+        assert str(note_row[1]) == str(cycle_id)
+
+        # Check action with horizon_days default
+        connection.execute(
+            text(
+                """
+                INSERT INTO actions (
+                    id, goal_id, strategy_id, action_type, target_type,
+                    reason, predicted_outcome, predicted_probability, horizon_days
+                ) VALUES (
+                    :action_id, :goal_id, :strategy_id, 'generate_application_package', 'role',
+                    'Test reason', 'Test outcome', 0.70, 21
+                )
+                """
+            ),
+            {"action_id": action_id, "goal_id": goal_id, "strategy_id": strategy_id},
+        )
+        action_row = connection.execute(
+            text("SELECT horizon_days FROM actions WHERE id = :id"),
+            {"id": action_id},
+        ).fetchone()
+        assert action_row is not None
+        assert action_row[0] == 21
+
+        trans.rollback()
+
+    # 11. Test downgrade to base and restore to head for subsequent tests
     command.downgrade(alembic_cfg, "base")
     command.upgrade(alembic_cfg, "head")
