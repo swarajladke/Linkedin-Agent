@@ -62,6 +62,33 @@ The core objective of Pilot is **auditable decision-making and learning from pre
 
 ---
 
+## Phase 5 Deliverables: Learning & Calibration (Complete)
+
+- [x] **1. Migration 0005 & Schema**: `strategies.policy` JSONB, `strategy_notes.evidence` JSONB, `strategy_notes.cycle_id` FK, `actions.horizon_days`. Symmetrical downgrade, zero-diff `alembic check`.
+- [x] **2. Outcome Resolution & Timeout**: Idempotent mapping of application stage transitions and expired prediction horizons into binary outcomes with in-database Brier scores. Critic drops isolated.
+- [x] **3. Deterministic Calibration & Bayesian Shrinkage**: Pure `compute_calibration` with decile reliability, Murphy decomposition (reliability, resolution, uncertainty), ECE, and skill score against base rate. Bayesian Beta shrinkage plugging into the pre-execution prediction seam.
+- [x] **4. Deterministic Failure Detection**: Statistical triggers (`credible_interval_breached`, `consecutive_starved`, `calibration_drift`, `critic_drop_spike`, `refuted_hypothesis`) with minimum sample size floor.
+- [x] **5. Bounded Reflection & Replay-Gated Adoption**: LLM reflection constrained to allow-list parameters and bounded deltas; counterfactual `replay_cycle` validation enforcing material selection differences before version bump; cooldown protection; non-destructive forward rollback.
+- [x] **6. Wire into Decision Cycle**: Closed-loop orchestration in exact sequence: `resolve_outcomes → update calibration → evaluate hypotheses → observe → diagnose → generate → score → select → predict (calibrated) → execute (critic gate) → detect → (reflect → evaluate_and_adopt) → commit`.
+- [x] **7. CLI & ASCII Diagram**: `pilot calibration [--strategy vN]`, `pilot strategy history`, `pilot strategy diff <vA> <vB>`, `pilot strategy rollback <vN>`, and `pilot learn --dry-run`.
+- [x] **8. System Invariants**: Mean Brier score over the last third of cycles strictly drops compared to the first third (empirically honest probabilities); no pivot without evidence.
+
+---
+
+## System Guarantees Across All Phases
+
+| Guarantee | Phase Introduced | Scope & Invariant Definition | Enforcement Mechanism |
+| :--- | :--- | :--- | :--- |
+| **Grounding** | Phase 1 | Every claim asserted about a candidate links to verified evidence: $\forall c \in \text{claims}, \text{excerpt}(c) \subseteq \text{doc}(c.\text{source})$. | Character-indexed `GroundingValidator` & extraction gate |
+| **Timeline** | Phase 1 | Sub-goal milestone deadlines are strictly ordered within goal horizon: $\text{created\_at} < d_1 < d_2 < \dots < d_K \leq \text{deadline}$. | Deterministic `GoalCompiler` back-solving |
+| **Idempotency** | Phases 1–5 | Repeated execution of sourcing, ingestion, outcome resolution, and calibration produces zero duplicate rows: $f(f(x)) = f(x)$. | Unique constraints & PostgreSQL UPSERT ON CONFLICT |
+| **Prediction-Before-Action** | Phase 3 | Every action persists explicit reasoning and calibrated probability before execution: $a.\text{created\_at} \leq a.\text{executed\_at} \land a.p \in [0, 1]$. | Pre-execution `record_prediction()` flush seam |
+| **Nothing-Unchecked-Ships** | Phase 4 | No generated package reaches human review or dispatch without passing verification: $\forall e \in \text{escalations}, \exists r \in \text{reviews} \text{ with verdict}=\text{'pass'}$. | Mandatory Critic gate & drop cap (2 attempts) |
+| **No-Pivot-Without-Evidence** | Phase 5 | Every strategy version after v1 must have a parent, a triggering signal with numeric evidence, and a non-empty replay diff: $\forall s \text{ with } v > 1, s.\text{parent\_id} \neq \text{NULL} \land n.\text{evidence} \neq \emptyset \land \text{diff} > 0$. | Deterministic failure detection, bounded reflection & replay diff gating |
+| **History-Is-Immutable** | Phases 1–5 | Past decisions and versions are never rewritten. Rollbacks create new versions forward; predictions are never altered after resolution. | Append-only models, immutable versions, rollback via forward creation |
+
+---
+
 ## Quickstart
 
 ### Prerequisites
@@ -163,4 +190,26 @@ Records actual real-world response/interview outcomes with automatic Brier score
 pilot outcome <action_id> --success
 pilot replay 1 --min-fit 0.85 --max-actions 3
 ```
+
+### 12. Calibration, Brier Decomposition & ASCII Reliability Diagram
+Inspects empirical calibration, Brier score decomposition (Reliability, Resolution, Uncertainty), skill vs. base rate, decile reliability, and ASCII diagram:
+```bash
+pilot calibration
+pilot calibration --strategy v1
+```
+
+### 13. Strategy Lineage, Diffs & Non-Destructive Rollback
+Inspects the auditable version lineage, parameter diffs, and performs non-destructive rollbacks:
+```bash
+pilot strategy history
+pilot strategy diff v1 v2
+pilot strategy rollback v1
+```
+
+### 14. Autonomous Learning Loop Simulation
+Simulates the learning half of a decision cycle on its own (outcome resolution, calibration, hypothesis evaluation, failure detection, and reflection proposal):
+```bash
+pilot learn --dry-run
+```
+
 

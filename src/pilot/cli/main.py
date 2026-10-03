@@ -50,6 +50,7 @@ from pilot.ingestion import (
     UnsupportedFileFormatError,
 )
 from pilot.intelligence import RoleAssessor, upsert_assessments
+from pilot.learning.schemas import CalibrationReport
 from pilot.sourcing import (
     AshbySource,
     GreenhouseSource,
@@ -65,9 +66,13 @@ cycle_app = typer.Typer(no_args_is_help=True, help="Run and inspect decision cyc
 voice_app = typer.Typer(
     no_args_is_help=True, help="Manage writing samples and statistical voice profile."
 )
+strategy_app = typer.Typer(
+    no_args_is_help=True, help="Manage strategy versions, history, diffs, and rollbacks."
+)
 app.add_typer(goal_app, name="goal")
 app.add_typer(cycle_app, name="cycle")
 app.add_typer(voice_app, name="voice")
+app.add_typer(strategy_app, name="strategy")
 
 console = Console()
 
@@ -1482,3 +1487,571 @@ def voice_show() -> None:
         )
 
         console.print(stats_table)
+
+
+def _resolve_strategy(
+    session: Session,
+    goal: Goal,
+    strategy_spec: str | None,
+) -> Strategy | None:
+    """Helper to resolve a strategy by version string (e.g. 'v1', '1') or UUID or active default."""
+    if strategy_spec is not None:
+        spec = strategy_spec.strip()
+        v_num: int | None = None
+        if spec.lower().startswith("v"):
+            try:
+                v_num = int(spec[1:])
+            except ValueError:
+                pass
+        else:
+            try:
+                v_num = int(spec)
+            except ValueError:
+                pass
+
+        if v_num is not None:
+            return (
+                session.execute(
+                    select(Strategy).where(Strategy.goal_id == goal.id, Strategy.version == v_num)
+                )
+                .scalars()
+                .first()
+            )
+
+        try:
+            s_uuid = UUID(spec)
+            return session.get(Strategy, s_uuid)
+        except ValueError:
+            return None
+
+    active = (
+        session.execute(
+            select(Strategy)
+            .where(Strategy.goal_id == goal.id, Strategy.retired_at.is_(None))
+            .order_by(Strategy.version.desc())
+        )
+        .scalars()
+        .first()
+    )
+    if active:
+        return active
+
+    return (
+        session.execute(
+            select(Strategy).where(Strategy.goal_id == goal.id).order_by(Strategy.version.desc())
+        )
+        .scalars()
+        .first()
+    )
+
+
+def _render_ascii_reliability(report: CalibrationReport) -> str:
+    """Render an ASCII reliability diagram for calibration reporting."""
+    lines: list[str] = []
+    lines.append("  Observed Rate")
+    lines.append("   1.0 |" + " " * 42)
+
+    grid = [[" " for _ in range(41)] for _ in range(11)]
+
+    # Draw perfect calibration diagonal points (·)
+    for col_idx in range(10):
+        col_pos = col_idx * 4 + 2
+        row_idx = round(10.0 - (col_idx + 0.5))
+        if 0 <= row_idx <= 10 and 0 <= col_pos <= 40:
+            grid[row_idx][col_pos] = "·"
+
+    # Plot observed rates (*)
+    for b in report.deciles:
+        if b.count > 0 and b.observed_rate is not None:
+            decile_idx = min(9, max(0, int(b.bin_lower * 10)))
+            col_pos = decile_idx * 4 + 2
+            row_idx = round((1.0 - b.observed_rate) * 10.0)
+            row_idx = max(0, min(10, row_idx))
+            if 0 <= col_pos <= 40:
+                grid[row_idx][col_pos] = "*"
+
+    for r in range(11):
+        val = (10 - r) / 10.0
+        row_str = "".join(grid[r])
+        if r % 2 == 0:
+            lines.append(f"   {val:3.1f} |{row_str}")
+        else:
+            lines.append(f"       |{row_str}")
+
+    lines.append("   0.0 +---+---+---+---+---+---+---+---+---+---+")
+    lines.append("      0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0  Predicted Probability")
+    lines.append(
+        "      Legend: [dim]· = Perfect Calibration[/dim]  [bold yellow]* = Observed Conversion[/bold yellow]\n"
+    )
+
+    lines.append("  Decile Breakdown Gauges:")
+    has_active = False
+    for b in report.deciles:
+        if b.count > 0:
+            has_active = True
+            p_bar_len = int(round((b.mean_predicted or 0.0) * 20))
+            o_bar_len = int(round((b.observed_rate or 0.0) * 20))
+            p_bar = "█" * p_bar_len + " " * (20 - p_bar_len)
+            o_bar = "█" * o_bar_len + " " * (20 - o_bar_len)
+            lines.append(
+                f"    [{b.bin_lower:.1f}-{b.bin_upper:.1f}] n={b.count:<3} | "
+                f"Pred: [{p_bar}] {b.mean_predicted:.2f}  "
+                f"Obs: [{o_bar}] {b.observed_rate:.2f}"
+            )
+    if not has_active:
+        lines.append("    [dim](No outcome data yet recorded for calibration buckets)[/dim]")
+
+    return "\n".join(lines)
+
+
+@app.command("calibration")
+def calibration_cmd(
+    strategy: Annotated[
+        str | None,
+        typer.Option("--strategy", "-s", help="Strategy version (e.g. 'v1', 'v2') or UUID."),
+    ] = None,
+) -> None:
+    """Display calibration report, reliability table, Brier score decomposition, and ASCII diagram."""
+    from pilot.learning.calibration import compute_calibration
+
+    run_migrations()
+
+    with get_db_session() as session:
+        try:
+            user = resolve_active_user(session)
+        except CLIUserError as err:
+            console.print(f"[red]{err}[/red]")
+            raise typer.Exit(1) from None
+
+        goal = (
+            session.execute(
+                select(Goal).where(Goal.user_id == user.id, Goal.status == GoalStatus.ACTIVE)
+            )
+            .scalars()
+            .first()
+        )
+        if not goal:
+            console.print("[yellow]No active goal found for candidate.[/yellow]")
+            raise typer.Exit(1)
+
+        strat = _resolve_strategy(session, goal, strategy)
+        if not strat:
+            console.print(f"[red]Strategy '{strategy}' not found for active goal.[/red]")
+            raise typer.Exit(1)
+
+        report = compute_calibration(session, strat.id, now=datetime.now(UTC))
+
+        status_text = (
+            "[bold green]ACTIVE[/bold green]" if not strat.retired_at else "[dim]RETIRED[/dim]"
+        )
+        skill_text = (
+            "[bold green]✓ Agent beats base rate[/bold green]"
+            if report.beats_base_rate
+            else "[bold red]✗ Agent does NOT beat base rate[/bold red]"
+        )
+        panel_content = (
+            f"[bold]Strategy:[/] v{strat.version} ({status_text})  "
+            f"[bold]Sample Size:[/] {report.sample_size} outcomes\n"
+            f"[bold]Mean Brier Score:[/] {report.mean_brier_score:.4f}  "
+            f"[bold]Expected Calibration Error (ECE):[/] {report.ece:.4f}\n"
+            f"[bold]Historical Base Rate:[/] {report.base_rate:.4f}  "
+            f"[bold]Brier Skill Score:[/] {report.brier_skill_score:+.4f} ({skill_text})"
+        )
+        console.print(Panel(panel_content, title="Calibration & Reliability Report", expand=False))
+
+        decomp_table = Table(title="Murphy Brier Score Decomposition (Rel - Res + Unc = Brier)")
+        decomp_table.add_column("Component", style="bold")
+        decomp_table.add_column("Value", style="cyan", justify="right")
+        decomp_table.add_column("Interpretation")
+
+        decomp = report.murphy_decomposition
+        decomp_table.add_row(
+            "Reliability (Rel)",
+            f"{decomp.reliability:.6f}",
+            "Calibration penalty: weighted squared distance of predictions to observations",
+        )
+        decomp_table.add_row(
+            "Resolution (Res)",
+            f"{decomp.resolution:.6f}",
+            "Discrimination ability: distance of conditional probabilities from base rate",
+        )
+        decomp_table.add_row(
+            "Uncertainty (Unc)",
+            f"{decomp.uncertainty:.6f}",
+            "Inherent task uncertainty: base_rate * (1 - base_rate)",
+        )
+        decomp_table.add_row(
+            "Total Brier Score",
+            f"{report.mean_brier_score:.6f}",
+            "Rel - Res + Unc",
+        )
+        console.print(decomp_table)
+
+        decile_table = Table(title=f"Decile Reliability Buckets (v{strat.version})")
+        decile_table.add_column("Decile Range", style="bold")
+        decile_table.add_column("Count (n)", justify="right")
+        decile_table.add_column("Mean Predicted", justify="right", style="cyan")
+        decile_table.add_column("Observed Rate", justify="right", style="magenta")
+        decile_table.add_column("Calibration Error", justify="right")
+
+        for b in report.deciles:
+            pred_str = f"{b.mean_predicted:.4f}" if b.mean_predicted is not None else "—"
+            obs_str = f"{b.observed_rate:.4f}" if b.observed_rate is not None else "—"
+            err_str = (
+                f"{abs((b.mean_predicted or 0) - (b.observed_rate or 0)):.4f}"
+                if b.count > 0 and b.mean_predicted is not None and b.observed_rate is not None
+                else "—"
+            )
+            decile_table.add_row(
+                f"[{b.bin_lower:.1f} - {b.bin_upper:.1f}]",
+                str(b.count),
+                pred_str,
+                obs_str,
+                err_str,
+            )
+        console.print(decile_table)
+
+        diagram = _render_ascii_reliability(report)
+        console.print(Panel(diagram, title="Empirical Reliability Diagram", expand=False))
+
+
+@strategy_app.command("history")
+def strategy_history_cmd() -> None:
+    """Display strategy version lineage, pivot triggers, hypotheses, and status."""
+    run_migrations()
+
+    with get_db_session() as session:
+        try:
+            user = resolve_active_user(session)
+        except CLIUserError as err:
+            console.print(f"[red]{err}[/red]")
+            raise typer.Exit(1) from None
+
+        goal = (
+            session.execute(
+                select(Goal).where(Goal.user_id == user.id, Goal.status == GoalStatus.ACTIVE)
+            )
+            .scalars()
+            .first()
+        )
+        if not goal:
+            console.print("[yellow]No active goal found for candidate.[/yellow]")
+            raise typer.Exit(1)
+
+        strategies = (
+            session.execute(
+                select(Strategy).where(Strategy.goal_id == goal.id).order_by(Strategy.version.asc())
+            )
+            .scalars()
+            .all()
+        )
+
+        table = Table(title=f"Strategy Version Lineage (Goal: {goal.objective_text[:40]}...)")
+        table.add_column("Version", style="bold cyan")
+        table.add_column("Status")
+        table.add_column("Parent", style="dim")
+        table.add_column("Trigger / Evidence")
+        table.add_column("Hypothesis & Policy Target")
+        table.add_column("Verification")
+        table.add_column("Created", style="dim")
+
+        for strat in strategies:
+            v_label = f"v{strat.version}"
+            status = (
+                "[bold green]ACTIVE[/bold green]" if not strat.retired_at else "[dim]RETIRED[/dim]"
+            )
+            parent_label = f"v{strat.parent_strategy.version}" if strat.parent_strategy else "—"
+
+            note = strat.notes[0] if strat.notes else None
+            trigger_text = "Initial Baseline" if strat.version == 1 else "—"
+            hypothesis_text = "—"
+            verification_status = "—"
+
+            if note:
+                ev = note.evidence or {}
+                if "triggering_signal" in ev:
+                    sig = ev["triggering_signal"]
+                    trigger_text = f"{sig.get('kind', 'Signal')}"
+                elif "rollback_to_version" in ev:
+                    trigger_text = f"Rollback to v{ev['rollback_to_version']}"
+                elif note.diagnosis:
+                    trigger_text = note.diagnosis[:30]
+
+                if note.hypothesis:
+                    hypothesis_text = note.hypothesis
+                elif note.content:
+                    hypothesis_text = note.content[:50]
+
+                if note.status:
+                    stat_val = (
+                        note.status.value if hasattr(note.status, "value") else str(note.status)
+                    ).upper()
+                    if stat_val == "CONFIRMED":
+                        verification_status = "[bold green]CONFIRMED[/bold green]"
+                    elif stat_val == "REFUTED":
+                        verification_status = "[bold red]REFUTED[/bold red]"
+                    elif stat_val == "INCONCLUSIVE":
+                        verification_status = "[yellow]INCONCLUSIVE[/yellow]"
+                    else:
+                        verification_status = f"[cyan]{stat_val}[/cyan]"
+
+            created_str = strat.created_at.strftime("%Y-%m-%d %H:%M") if strat.created_at else "—"
+            table.add_row(
+                v_label,
+                status,
+                parent_label,
+                trigger_text,
+                hypothesis_text,
+                verification_status,
+                created_str,
+            )
+
+        console.print(table)
+
+
+@strategy_app.command("diff")
+def strategy_diff_cmd(
+    v_a: Annotated[str, typer.Argument(help="Base strategy version (e.g. 'v1' or '1')")],
+    v_b: Annotated[str, typer.Argument(help="Target strategy version (e.g. 'v2' or '2')")],
+) -> None:
+    """Compare tunable policy parameters and replay selection diff between two strategy versions."""
+    run_migrations()
+
+    with get_db_session() as session:
+        try:
+            user = resolve_active_user(session)
+        except CLIUserError as err:
+            console.print(f"[red]{err}[/red]")
+            raise typer.Exit(1) from None
+
+        goal = (
+            session.execute(
+                select(Goal).where(Goal.user_id == user.id, Goal.status == GoalStatus.ACTIVE)
+            )
+            .scalars()
+            .first()
+        )
+        if not goal:
+            console.print("[yellow]No active goal found for candidate.[/yellow]")
+            raise typer.Exit(1)
+
+        strat_a = _resolve_strategy(session, goal, v_a)
+        strat_b = _resolve_strategy(session, goal, v_b)
+
+        if not strat_a or not strat_b:
+            missing = v_a if not strat_a else v_b
+            console.print(f"[red]Strategy '{missing}' could not be resolved.[/red]")
+            raise typer.Exit(1)
+
+        policy_a = strat_a.policy or {}
+        policy_b = strat_b.policy or {}
+
+        table = Table(title=f"Policy Parameters Diff: v{strat_a.version} → v{strat_b.version}")
+        table.add_column("Parameter", style="bold")
+        table.add_column(f"v{strat_a.version}", justify="right")
+        table.add_column(f"v{strat_b.version}", justify="right")
+        table.add_column("Change / Delta", style="yellow")
+
+        all_keys = sorted(set(policy_a.keys()) | set(policy_b.keys()))
+        for k in all_keys:
+            val_a = policy_a.get(k)
+            val_b = policy_b.get(k)
+            if val_a != val_b:
+                if isinstance(val_a, (int, float)) and isinstance(val_b, (int, float)):
+                    delta = val_b - val_a
+                    delta_str = f"{delta:+g}"
+                else:
+                    delta_str = "MODIFIED"
+                table.add_row(k, str(val_a), f"[bold green]{val_b}[/bold green]", delta_str)
+            else:
+                table.add_row(k, str(val_a), str(val_b), "[dim]unchanged[/dim]")
+
+        console.print(table)
+
+        replay_found = False
+        for strat in (strat_b, strat_a):
+            for n in strat.notes:
+                ev = n.evidence or {}
+                if "replay_diff" in ev:
+                    diff_info = ev["replay_diff"]
+                    replay_panel = (
+                        f"[bold]Replay Tested Cycles:[/] {diff_info.get('replayed_cycles', '—')}\n"
+                        f"[bold]Added Actions:[/] {diff_info.get('total_added', 0)}\n"
+                        f"[bold]Removed Actions:[/] {diff_info.get('total_removed', 0)}\n"
+                        f"[bold]Replay Diff Rationale:[/] "
+                        f"{diff_info.get('rationale_diff', 'Selection divergence confirmed.')}"
+                    )
+                    console.print(Panel(replay_panel, title="Replay Selection Diff", expand=False))
+                    replay_found = True
+                    break
+            if replay_found:
+                break
+
+        if not replay_found:
+            console.print(
+                "[dim]No historical counterfactual replay recorded between these versions.[/dim]"
+            )
+
+
+@strategy_app.command("rollback")
+def strategy_rollback_cmd(
+    version: Annotated[
+        str,
+        typer.Argument(help="Target strategy version to rollback to (e.g. 'v1' or '1')"),
+    ],
+) -> None:
+    """Rollback strategy to a previous version by creating a new version with the old policy."""
+    from pilot.learning.adopt import rollback_strategy
+
+    run_migrations()
+
+    with get_db_session() as session:
+        try:
+            user = resolve_active_user(session)
+        except CLIUserError as err:
+            console.print(f"[red]{err}[/red]")
+            raise typer.Exit(1) from None
+
+        goal = (
+            session.execute(
+                select(Goal).where(Goal.user_id == user.id, Goal.status == GoalStatus.ACTIVE)
+            )
+            .scalars()
+            .first()
+        )
+        if not goal:
+            console.print("[yellow]No active goal found for candidate.[/yellow]")
+            raise typer.Exit(1)
+
+        v_clean = version.lstrip("vV")
+        try:
+            target_v = int(v_clean)
+        except ValueError:
+            console.print(
+                f"[red]Invalid version integer '{version}'. Expected e.g. 'v1' or '1'.[/red]"
+            )
+            raise typer.Exit(1) from None
+
+        try:
+            new_strat = rollback_strategy(session, goal, to_version=target_v, now=datetime.now(UTC))
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            console.print(f"[red]Rollback failed: {e}[/red]")
+            raise typer.Exit(1) from None
+
+        console.print(
+            Panel(
+                f"[bold green]✓ Strategy successfully rolled back to v{target_v}![/bold green]\n"
+                f"  New Version:       [bold cyan]v{new_strat.version}[/bold cyan]\n"
+                f"  Copied From:       v{target_v}\n"
+                f"  Parent Version:    {new_strat.parent_version_id}\n"
+                f"  History Guarantees: All previous versions remain immutable in database.",
+                title="Strategy Rollback",
+                expand=False,
+            )
+        )
+
+
+@app.command("learn")
+def learn_cmd(
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--no-dry-run",
+            help="Simulate learning half of cycle without committing changes.",
+        ),
+    ] = True,
+) -> None:
+    """Execute learning half of decision cycle: outcomes, calibration, hypotheses, and detection."""
+    from pilot.learning.adopt import evaluate_and_adopt
+    from pilot.learning.calibration import compute_calibration
+    from pilot.learning.detect import detect_strategy_failure
+    from pilot.learning.hypotheses import evaluate_hypotheses
+    from pilot.learning.outcomes import resolve_outcomes
+    from pilot.learning.reflect import reflect
+
+    run_migrations()
+
+    now = datetime.now(UTC)
+    with get_db_session() as session:
+        try:
+            user = resolve_active_user(session)
+        except CLIUserError as err:
+            console.print(f"[red]{err}[/red]")
+            raise typer.Exit(1) from None
+
+        goal = (
+            session.execute(
+                select(Goal).where(Goal.user_id == user.id, Goal.status == GoalStatus.ACTIVE)
+            )
+            .scalars()
+            .first()
+        )
+        if not goal:
+            console.print("[yellow]No active goal found for candidate.[/yellow]")
+            raise typer.Exit(1)
+
+        active_strategy = (
+            session.execute(
+                select(Strategy)
+                .where(Strategy.goal_id == goal.id, Strategy.retired_at.is_(None))
+                .order_by(Strategy.version.desc())
+            )
+            .scalars()
+            .first()
+        )
+        if not active_strategy:
+            console.print("[red]No active strategy found for goal.[/red]")
+            raise typer.Exit(1)
+
+        res_res = resolve_outcomes(session, goal, now=now)
+        cal_rep = compute_calibration(session, active_strategy.id, now=now)
+        hypo_evals = evaluate_hypotheses(session, goal, now=now)
+
+        failure_sig = detect_strategy_failure(session, goal, active_strategy, now=now)
+        refl = None
+        adopt_res = None
+        if failure_sig:
+            refl = reflect(goal, active_strategy, failure_sig, [], llm=None)
+            adopt_res = evaluate_and_adopt(session, goal, refl, now=now)
+
+        mode_title = (
+            "[bold yellow]Pilot Learning Pass (DRY RUN — Zero DB Writes)[/bold yellow]"
+            if dry_run
+            else "[bold green]✓ Pilot Learning Pass Committed[/bold green]"
+        )
+
+        lines: list[str] = [
+            f"[bold]Strategy:[/] v{active_strategy.version}",
+            f"[bold]Outcomes Resolved:[/] {res_res.resolved_count} "
+            f"({res_res.stage_transition_resolved} stage transitions, "
+            f"{res_res.timeout_resolved} timed out)",
+            f"[bold]Open Predictions:[/] {res_res.open_predictions}",
+            f"[bold]Calibration Brier Score:[/] {cal_rep.mean_brier_score:.4f} "
+            f"(ECE: {cal_rep.ece:.4f}, N={cal_rep.sample_size})",
+            f"[bold]Hypotheses Evaluated:[/] {len(hypo_evals)}",
+        ]
+        if failure_sig:
+            lines.append(
+                f"[bold yellow]Failure Detected:[/] {failure_sig.kind.value} ({failure_sig.summary})"
+            )
+            if refl:
+                lines.append(f"[bold]Proposed Reflection:[/] {refl.hypothesis}")
+            if adopt_res:
+                lines.append(
+                    f"[bold]Adoption Decision:[/] {'ADOPTED' if adopt_res.adopted else 'REJECTED'} "
+                    f"({adopt_res.rejection_reason or f'New Strategy v{adopt_res.new_strategy_version}'})"
+                )
+        else:
+            lines.append(
+                "[dim green]No failure signals detected. "
+                "Current policy is operating within bounds.[/dim green]"
+            )
+
+        if dry_run:
+            session.rollback()
+        else:
+            session.commit()
+
+        console.print(Panel("\n".join(lines), title=mode_title, expand=False))

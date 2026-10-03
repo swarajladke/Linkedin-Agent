@@ -345,3 +345,40 @@ Two consecutive regeneration failures result in an immediate drop without escala
    Writing samples are indexed by SHA-256 hash per user, ensuring multiple ingestions of identical writing samples result in zero duplicate database rows.
 
 
+## 9. Phase 5: Learning & Calibration (Complete)
+
+**Objective:** Close the learning and adaptation loop:
+
+$$\text{Record Outcome} \longrightarrow \text{Score Prediction} \longrightarrow \text{Update Calibration} \longrightarrow \text{Detect Strategy Failure} \longrightarrow \text{Write Reflection} \longrightarrow \text{Fork Strategy Version} \longrightarrow \text{Planner Uses New Version}$$
+
+Every learning step is auditable and reversible. A system that silently retunes itself cannot be verified. Strategy changes are triggered strictly by empirical evidence rather than schedules, and validated counterfactually via replay before adoption.
+
+### Phase 5 Progress Dashboard
+
+| # | Step Name | Scope & Key Deliverables | Status |
+| :-: | :--- | :--- | :-: |
+| **5.1** | **Migration 0005 & Models** | Added `strategies.policy` JSONB, `strategy_notes.evidence` JSONB, `strategy_notes.cycle_id` foreign key, and `actions.horizon_days`. Symmetrical downgrade, zero-diff `alembic check`. | **COMPLETED** |
+| **5.2** | **Outcome Resolution & Timeout** | `resolve_outcomes()` maps application stage transitions to actions; timeout resolution for expired horizons without signal; critic drops isolated; idempotent execution. | **COMPLETED** |
+| **5.3** | **Calibration & Bayesian Shrinkage** | Pure deterministic `compute_calibration()` with decile reliability, Murphy decomposition ($Rel - Res + Unc = Brier$), ECE, and skill score vs. base rate. Bayesian Beta shrinkage estimator plugging into `predict.py` seam. | **COMPLETED** |
+| **5.4** | **Deterministic Failure Detection** | `detect_strategy_failure()` fires on K consecutive starved cycles, Beta credible interval breach, calibration drift, critic drop spike, and refuted hypotheses. Sample floor prevents pivoting on noise. | **COMPLETED** |
+| **5.5** | **Bounded Reflection & Replay-Gated Adoption** | Constrained LLM reflection with allow-list parameters and strict delta limits; `replay_cycle()` selection diff gating; cooldown enforcement; non-destructive forward rollback. | **COMPLETED** |
+| **5.6** | **Cycle Orchestration Integration** | Wired closed loop into `run_cycle()`: `resolve_outcomes → update calibration → evaluate hypotheses → observe → diagnose → generate → score → select → predict (calibrated) → execute (critic gate) → detect → (reflect → evaluate_and_adopt) → commit`. Single transaction with dry-run support. | **COMPLETED** |
+| **5.7** | **CLI Extensions** | `pilot calibration [--strategy vN]`, `pilot strategy history`, `pilot strategy diff <vA> <vB>`, `pilot strategy rollback <vN>`, and `pilot learn --dry-run`. | **COMPLETED** |
+| **5.8** | **Integrity & Invariant Test Suite** | Hand-computed math fixtures; 12-cycle simulated world proving Brier score strictly drops over time; no pivot without evidence; history immutability. | **COMPLETED** |
+
+---
+
+## 10. Master System Guarantees Across All Five Phases
+
+| Guarantee | Phase Introduced | Mathematical / Relational Invariant | Enforcement & Audit Mechanism |
+| :--- | :--- | :--- | :--- |
+| **Grounding** | Phase 1 | $\forall c \in \text{claims}, \text{excerpt}(c) \subseteq \text{raw\_text}(c.\text{source})$ | Character-level index validator; ungrounded assertions dropped before persistence. |
+| **Timeline** | Phase 1 | $\text{created\_at} < d_1 < d_2 < \dots < d_K \leq \text{deadline} \land \text{funnel volumes monotonic}$ | Pure Python solver back-solving conversion funnels within calendar horizons. |
+| **Idempotency** | Phases 1–5 | $f(f(x)) = f(x) \quad \forall f \in \{\text{ingest, source, resolve, calibrate}\}$ | Relational `ON CONFLICT` constraints and atomic deterministic upserts. |
+| **Prediction-Before-Action** | Phase 3 | $a.\text{created\_at} \leq a.\text{executed\_at} \land a.\text{predicted\_probability} \in [0, 1]$ | Compulsory DB flush in `record_prediction()` before critic or execution can run. |
+| **Nothing-Unchecked-Ships** | Phase 4 | $\forall e \in \text{escalations}, \exists r \in \text{reviews} \text{ with } r.\text{action\_id} = e.\text{action\_id} \land r.\text{verdict} = \text{'pass'}$ | Mandatory 3-check Critic gate; 2-attempt regeneration cap with automatic drop. |
+| **No-Pivot-Without-Evidence** | Phase 5 | $\forall s \text{ with } v > 1, s.\text{parent\_id} \neq \text{NULL} \land \exists n \in \text{notes}(s) \text{ where } n.\text{evidence} \neq \emptyset \land \text{diff}(\text{replay}) > 0$ | Statistical triggers with sample floors, bounded reflection, and replay diff gating. |
+| **History-Is-Immutable** | Phases 1–5 | Past actions, predictions, reviews, and strategy rows are append-only and never modified or deleted. | Rollback creates new version forward; DB triggers calculate Brier scores. |
+
+
+

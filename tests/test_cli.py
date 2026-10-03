@@ -10,7 +10,17 @@ from typer.testing import CliRunner
 
 from pilot.cli.main import app
 from pilot.config import get_settings
-from pilot.db.models import EvidenceClaim, Goal, GoalStatus, User
+from pilot.db.models import (
+    Action,
+    ActionOutcome,
+    EvidenceClaim,
+    Goal,
+    GoalStatus,
+    Strategy,
+    StrategyNote,
+    StrategyNoteStatus,
+    User,
+)
 from pilot.db.session import get_db_session
 from pilot.extraction.extractor import ExtractionDroppedClaim, ExtractionResult
 from pilot.goals.schemas import CompiledGoalDraft, FunnelAssumptions
@@ -44,6 +54,12 @@ def test_cli_help_and_subcommand_helps():
         ["goal", "--help"],
         ["goal", "set", "--help"],
         ["show", "--help"],
+        ["calibration", "--help"],
+        ["strategy", "--help"],
+        ["strategy", "history", "--help"],
+        ["strategy", "diff", "--help"],
+        ["strategy", "rollback", "--help"],
+        ["learn", "--help"],
     ]:
         sub_res = runner.invoke(app, subcmd)
         assert sub_res.exit_code == 0
@@ -418,3 +434,189 @@ def test_pilot_assess_and_explain_commands(monkeypatch):
     assert show_res.exit_code == 0
     assert "Top Assessed Opportunities" in show_res.stdout
     assert "CloudScale" in show_res.stdout
+
+
+def test_cli_calibration_and_diagram():
+    """Test pilot calibration outputs report, Brier decomposition, and ASCII diagram."""
+    email = f"calib_{uuid.uuid4().hex[:8]}@example.com"
+    init_res = runner.invoke(app, ["init", "--email", email, "--name", "Calib User"])
+    assert init_res.exit_code == 0
+
+    with get_db_session() as session:
+        user = session.scalar(select(User).where(User.email == email))
+        goal = Goal(
+            user_id=user.id,
+            objective_text="Secure Senior Calibration ML Engineer role",
+            constraints_json={"max_applications_per_day": 5},
+            success_criteria={"min_offers": 1},
+            target_spec={},
+            sub_goals=[],
+            deadline=datetime(2027, 1, 1, tzinfo=UTC),
+            status=GoalStatus.ACTIVE,
+        )
+        session.add(goal)
+        session.flush()
+
+        strategy = Strategy(
+            goal_id=goal.id,
+            version=1,
+            policy={
+                "fit_floor": 0.50,
+                "default_conversion_prior": 0.70,
+                "prior_strength": 5.0,
+            },
+        )
+        session.add(strategy)
+        session.flush()
+
+        action = Action(
+            goal_id=goal.id,
+            strategy_id=strategy.id,
+            action_type="generate_application_package",
+            target_type="role",
+            target_id=uuid.uuid4(),
+            reason="High fit application",
+            predicted_outcome="Conversion in 14 days",
+            predicted_probability=0.75,
+            executed_at=datetime.now(UTC),
+            horizon_days=14,
+        )
+        session.add(action)
+        session.flush()
+
+        outcome = ActionOutcome(
+            action_id=action.id,
+            binary_success=True,
+            brier_score=0.0625,
+            diagnosis="Successful interview transition",
+            recorded_at=datetime.now(UTC),
+        )
+        session.add(outcome)
+        session.commit()
+
+    # Default active strategy
+    res1 = runner.invoke(app, ["calibration"])
+    assert res1.exit_code == 0
+    assert "Calibration & Reliability Report" in res1.stdout
+    assert "Murphy Brier Score Decomposition" in res1.stdout
+    assert "Decile Reliability Buckets" in res1.stdout
+    assert "Empirical Reliability Diagram" in res1.stdout
+
+    # Explicit strategy flag
+    res2 = runner.invoke(app, ["calibration", "--strategy", "v1"])
+    assert res2.exit_code == 0
+    assert "v1" in res2.stdout
+
+
+def test_cli_strategy_history_diff_and_rollback():
+    """Test pilot strategy history, diff, and rollback commands."""
+    email = f"strat_{uuid.uuid4().hex[:8]}@example.com"
+    init_res = runner.invoke(app, ["init", "--email", email, "--name", "Strategy User"])
+    assert init_res.exit_code == 0
+
+    with get_db_session() as session:
+        user = session.scalar(select(User).where(User.email == email))
+        goal = Goal(
+            user_id=user.id,
+            objective_text="Secure Lead Policy Engineer role",
+            constraints_json={"max_applications_per_day": 2},
+            success_criteria={"min_offers": 1},
+            target_spec={},
+            sub_goals=[],
+            deadline=datetime(2027, 1, 1, tzinfo=UTC),
+            status=GoalStatus.ACTIVE,
+        )
+        session.add(goal)
+        session.flush()
+
+        s1 = Strategy(
+            goal_id=goal.id,
+            version=1,
+            policy={"fit_floor": 0.50, "prior_strength": 5.0},
+            retired_at=datetime.now(UTC),
+        )
+        session.add(s1)
+        session.flush()
+
+        s2 = Strategy(
+            goal_id=goal.id,
+            version=2,
+            parent_version_id=s1.id,
+            policy={"fit_floor": 0.65, "prior_strength": 5.0},
+        )
+        session.add(s2)
+        session.flush()
+
+        note = StrategyNote(
+            goal_id=goal.id,
+            strategy_id=s2.id,
+            hypothesis="Raising fit floor to 0.65 will lift conversion above 8%",
+            status=StrategyNoteStatus.ACTIVE,
+            evidence={
+                "triggering_signal": {"kind": "credible_interval_breached"},
+                "replay_diff": {
+                    "total_added": 2,
+                    "total_removed": 1,
+                    "rationale_diff": "Selected higher fit candidates.",
+                },
+            },
+        )
+        session.add(note)
+        session.commit()
+
+    # 1. pilot strategy history
+    res_hist = runner.invoke(app, ["strategy", "history"])
+    assert res_hist.exit_code == 0
+    assert "Strategy Version Lineage" in res_hist.stdout
+    assert "v1" in res_hist.stdout
+    assert "v2" in res_hist.stdout
+    assert "credible" in res_hist.stdout
+
+    # 2. pilot strategy diff
+    res_diff = runner.invoke(app, ["strategy", "diff", "v1", "v2"])
+    assert res_diff.exit_code == 0
+    assert "Policy Parameters Diff: v1 → v2" in res_diff.stdout
+    assert "fit_floor" in res_diff.stdout
+    assert "0.65" in res_diff.stdout
+    assert "Replay Selection Diff" in res_diff.stdout
+
+    # 3. pilot strategy rollback
+    res_rb = runner.invoke(app, ["strategy", "rollback", "v1"])
+    assert res_rb.exit_code == 0
+    assert "Strategy successfully rolled back to v1" in res_rb.stdout
+    assert "v3" in res_rb.stdout
+
+
+def test_cli_learn_dry_run():
+    """Test pilot learn --dry-run simulates learning pass without mutating database."""
+    email = f"learn_{uuid.uuid4().hex[:8]}@example.com"
+    init_res = runner.invoke(app, ["init", "--email", email, "--name", "Learn User"])
+    assert init_res.exit_code == 0
+
+    with get_db_session() as session:
+        user = session.scalar(select(User).where(User.email == email))
+        goal = Goal(
+            user_id=user.id,
+            objective_text="Secure Research Scientist role",
+            constraints_json={"max_applications_per_day": 2},
+            success_criteria={"min_offers": 1},
+            target_spec={},
+            sub_goals=[],
+            deadline=datetime(2027, 1, 1, tzinfo=UTC),
+            status=GoalStatus.ACTIVE,
+        )
+        session.add(goal)
+        session.flush()
+
+        strat = Strategy(
+            goal_id=goal.id,
+            version=1,
+            policy={"fit_floor": 0.50, "prior_strength": 5.0},
+        )
+        session.add(strat)
+        session.commit()
+
+    learn_res = runner.invoke(app, ["learn", "--dry-run"])
+    assert learn_res.exit_code == 0
+    assert "Pilot Learning Pass (DRY RUN" in learn_res.stdout
+    assert "Outcomes Resolved" in learn_res.stdout
